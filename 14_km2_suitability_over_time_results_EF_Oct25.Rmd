@@ -1,0 +1,621 @@
+---
+title: "14_km2_suitability_over_time_results_EF_Oct25"
+date: 1st version "2025-02-14"" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load packages that can be used
+```{r}
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+library(ggplot2)
+library(viridisLite)
+library(ggplot2)
+library(viridis)
+library(tidyr)
+library(readr)
+library(packcircles)
+```
+
+
+#Loop through Raster Files of combined Pattern and Analogue to generate a Raster with the Area of the different categories of analogues with distance from the coast, by puting areas within maritime territories 
+
+```{r}
+# Load required libraries
+library(terra)
+library(tidyverse)
+library(here)
+library(dplyr)
+library(readr)
+library(sf)
+library(ggplot2)
+library(viridis)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(patchwork)
+```
+
+```{r}
+# STEP 1: CREATE CORRECTED DATA EXCLUDING TERRESTRIAL AREA
+# Read marine zone shapefiles
+# 1.  Create bbox in Albers
+
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_as_sf() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+#2. Load and process all required data
+
+
+maritime_boundaries_AU<- st_read(here("raw_data/AU_GA_SSLA-1973-AMB2014a_Maritime_boundaries_Australia/AU_GA_SSLA_1973_AMB2014a_ts_1990_poly.shp"))%>%
+ st_transform("EPSG:3577")%>%
+ st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# 3. Crop all layers to bbox
+
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+maritime_boundaries_crop<-st_intersection(maritime_boundaries_AU,bbox_albers)
+
+
+state_waters<-st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+
+# 4. Create High Seas
+all_managed_waters_and_land <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "terrestrial_areas")
+)
+
+high_seas <- st_difference(bbox_albers, st_union(all_managed_waters_and_land))
+```
+
+```{r}
+marine_zones <- list(
+  "State Waters" = state_waters,
+  "Commonwealth Waters" = commonwealth_crop,
+  "High Seas" = high_seas
+)
+
+# Initialize the results dataframe
+area_results_marine_corrected <- data.frame(
+  SSP = character(),
+  Decade = character(),
+  Pattern = character(),
+  Marine_Zone = character(),
+  No_Analog_km2 = numeric(),
+  Low_Confidence_km2 = numeric(),
+  Medium_Confidence_km2 = numeric(),
+  High_Confidence_km2 = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Define patterns
+patterns <- c("suitable", "optimal")
+
+# Path to folder with rasters
+ESM_Agreement_results_folder <- here("output_data/Combined_Results/ESM_agreement")
+raster_files <- list.files(ESM_Agreement_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Process each pattern and file
+for (pattern in patterns) {
+  for (file in raster_files) {
+    if (grepl(pattern, basename(file))) {
+      cat("Processing:", basename(file), "\n")
+      
+      # Read and project raster
+      r <- rast(file)
+      if (crs(r) != "EPSG:3577") {
+        r <- project(r, "EPSG:3577")
+      }
+      
+      # Extract filename components
+      file_name <- basename(file)
+      parts <- unlist(strsplit(file_name, "_"))
+      ssp <- parts[1]
+      decade_range <- paste(parts[2], parts[3], sep = "_")
+      
+      # Calculate areas for each marine zone using the pre-defined polygons
+      for (zone_name in names(marine_zones)) {
+        zone_vect <- vect(marine_zones[[zone_name]])
+        zone_mask <- mask(r, zone_vect)
+        area_raster <- cellSize(zone_mask, unit = "m")
+        
+        no_analog_area <- as.numeric(global(area_raster * (zone_mask == 0), 
+                                          sum, na.rm = TRUE)[, 1]) / 1e6
+        low_conf_area <- as.numeric(global(area_raster * (zone_mask == 1), 
+                                         sum, na.rm = TRUE)[, 1]) / 1e6
+        medium_conf_area <- as.numeric(global(area_raster * (zone_mask == 2), 
+                                            sum, na.rm = TRUE)[, 1]) / 1e6
+        high_conf_area <- as.numeric(global(area_raster * (zone_mask == 3), 
+                                          sum, na.rm = TRUE)[, 1]) / 1e6
+        
+        # Replace NAs with 0
+        no_analog_area <- ifelse(is.na(no_analog_area), 0, no_analog_area)
+        low_conf_area <- ifelse(is.na(low_conf_area), 0, low_conf_area)
+        medium_conf_area <- ifelse(is.na(medium_conf_area), 0, medium_conf_area)
+        high_conf_area <- ifelse(is.na(high_conf_area), 0, high_conf_area)
+        
+        # Add results to dataframe
+        area_results_marine_corrected <- area_results_marine_corrected %>%
+          add_row(
+            SSP = ssp,
+            Decade = decade_range,
+            Pattern = pattern,
+            Marine_Zone = zone_name,
+            No_Analog_km2 = no_analog_area,
+            Low_Confidence_km2 = low_conf_area,
+            Medium_Confidence_km2 = medium_conf_area,
+            High_Confidence_km2 = high_conf_area
+          )
+        
+        cat("Processed", zone_name, "for", ssp, decade_range, pattern, "\n")
+      }
+    }
+  }
+}
+
+# Create output directories
+dir.create(here("output_data", "ESM_Agreement_Plots_Area_CORRECTED"), recursive = TRUE, showWarnings = FALSE)
+dir.create(here("Figures", "Marine_territory_plots_CORRECTED"), recursive = TRUE, showWarnings = FALSE)
+
+# Save corrected results
+write.csv(area_results_marine_corrected, 
+          here("output_data", "ESM_Agreement_Plots_Area_CORRECTED", "area_results_marine_zones_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# STEP 2: DATA CLEANING AND PREPARATION FOR VISUALIZATION
+# Clean and prepare data for visualization
+area_results_high_corrected <- area_results_marine_corrected %>%
+  select(SSP, Decade, Pattern, Marine_Zone, High_Confidence_km2) %>%
+  rename(Area_km2 = High_Confidence_km2) %>%
+  # Clean up SSP names
+  mutate(
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Ensure Marine_Zone is clean
+    Marine_Zone_Clean = as.character(Marine_Zone),
+    # Set factor order for consistent plotting
+    Marine_Zone_Clean = factor(Marine_Zone_Clean, levels = c("State Waters", "Commonwealth Waters", "High Seas"))
+  ) %>%
+  # Remove any rows with missing data
+  filter(!is.na(Pattern), !is.na(Marine_Zone_Clean), !is.na(Area_km2)) %>%
+  # Ensure we only have the expected patterns
+  filter(Pattern %in% c("suitable", "optimal"))
+
+# Debug: Check the cleaned data
+cat("Data cleaning results:\n")
+cat("Unique Marine Zones:", paste(unique(area_results_high_corrected$Marine_Zone_Clean), collapse = ", "), "\n")
+cat("Unique Patterns:", paste(unique(area_results_high_corrected$Pattern), collapse = ", "), "\n")
+cat("Unique SSPs:", paste(unique(area_results_high_corrected$SSP_clean), collapse = ", "), "\n")
+cat("Total rows:", nrow(area_results_high_corrected), "\n")
+
+# Current aquaculture usage
+current_area <- 25.88
+
+# STEP 3: CREATE VISUALIZATION FUNCTIONS
+# Function to create plots for each marine territory (high confidence only)
+create_territory_plots_high_conf_corrected <- function(data, territory) {
+  # Filter data for specific marine territory
+  territory_data <- data %>%
+    filter(Marine_Zone_Clean == territory) %>%
+    filter(!is.na(Pattern), !is.na(SSP_clean), !is.na(Area_km2))
+  
+  # Check if we have data for this territory
+  if(nrow(territory_data) == 0) {
+    cat("Warning: No data found for territory:", territory, "\n")
+    return(NULL)
+  }
+  
+  # Check patterns available
+  available_patterns <- unique(territory_data$Pattern)
+  cat("Territory:", territory, "has patterns:", paste(available_patterns, collapse = ", "), "\n")
+  cat("Number of data points:", nrow(territory_data), "\n")
+  
+  # 1. Line plot showing trends for all SSPs
+  p1 <- ggplot(territory_data, 
+               aes(x = Decade, y = Area_km2, color = SSP_clean, group = SSP_clean)) +
+    geom_line(size = 1) +
+    geom_point(size = 3) +
+    facet_wrap(~Pattern, scales = "free_y", drop = FALSE) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom") +
+    scale_color_manual(values = c("SSP1-1.9" = "#440154FF",   # Purple
+                                 "SSP1-2.6" = "#31688EFF",    # Blue 
+                                 "SSP2-4.5" = "#35B779FF",    # Teal/Green
+                                 "SSP3-7.0" = "#90D743FF",    # Light Green
+                                 "SSP5-8.5" = "#FDE725FF"),   # Yellow
+                       na.value = "grey50") + 
+    labs(title = paste(territory, "- High Confidence Area Changes Over Time (CORRECTED)"),
+         subtitle = "High Seas now properly excludes terrestrial areas",
+         x = "Decade", 
+         y = "Area (km²)",
+         color = "SSP Scenario")
+  
+  # 2. Bar plot showing changes over decades with current usage reference
+  p2 <- ggplot(territory_data, 
+               aes(x = Decade, y = Area_km2, fill = SSP_clean)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_hline(yintercept = current_area, 
+               linetype = "dashed", 
+               color = "magenta",
+               size = 1) +
+    facet_wrap(~Pattern, scales = "free_y", drop = FALSE) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom") +
+    scale_fill_manual(values = c("SSP1-1.9" = "#440154FF",   
+                                "SSP1-2.6" = "#31688EFF",    
+                                "SSP2-4.5" = "#35B779FF",    
+                                "SSP3-7.0" = "#90D743FF",    
+                                "SSP5-8.5" = "#FDE725FF"),
+                      na.value = "grey50") +
+    labs(title = paste(territory, "- High Confidence Areas vs Current Usage (CORRECTED)"),
+         subtitle = paste("magenta line shows current usage:", current_area, "km²"),
+         x = "Decade", 
+         y = "Area (km²)",
+         fill = "SSP Scenario")
+  
+  # Save individual plots
+  tryCatch({
+    ggsave(here("Figures", "Marine_territory_plots_CORRECTED", 
+                paste0(make.names(territory), "_high_conf_trends_CORRECTED.png")), 
+           p1, width = 12, height = 8)
+    
+    ggsave(here("Figures", "Marine_territory_plots_CORRECTED", 
+                paste0(make.names(territory), "_high_conf_bars_CORRECTED.png")), 
+           p2, width = 12, height = 8)
+    
+    # Create and save combined plot
+    combined <- (p1 / p2) +
+      plot_annotation(title = paste("High Confidence Areas Analysis (CORRECTED):", territory),
+                     theme = theme_minimal())
+    
+    ggsave(here("Figures", "Marine_territory_plots_CORRECTED", 
+                paste0(make.names(territory), "_high_conf_combined_CORRECTED.png")), 
+           combined, width = 15, height = 12)
+    
+    cat("Successfully saved plots for", territory, "\n")
+    
+  }, error = function(e) {
+    cat("Error saving plots for", territory, ":", e$message, "\n")
+  })
+  
+  return(list(trends = p1, bars = p2))
+}
+
+# STEP 4: GENERATE PLOTS FOR ALL TERRITORIES
+# Get territories (ensure they're character, not factor levels)
+territories <- unique(as.character(area_results_high_corrected$Marine_Zone_Clean))
+territories <- territories[!is.na(territories)]
+
+cat("Creating plots for territories:", paste(territories, collapse = ", "), "\n")
+
+# Create plots for each marine territory
+all_plots_corrected <- list()
+for(territory in territories) {
+  cat("\n--- Processing territory:", territory, "---\n")
+  plots <- create_territory_plots_high_conf_corrected(area_results_high_corrected, territory)
+  if(!is.null(plots)) {
+    all_plots_corrected[[territory]] <- plots
+  }
+}
+
+# STEP 5: CREATE COMBINED COMPARISON PLOTS
+# Function to create individual bar plots for combination
+create_bar_plot_corrected <- function(data, territory) {
+  territory_data <- data %>% 
+    filter(Marine_Zone_Clean == territory) %>%
+    filter(!is.na(Pattern), !is.na(SSP_clean), !is.na(Area_km2))
+  
+  if(nrow(territory_data) == 0) {
+    return(NULL)
+  }
+  
+  ggplot(territory_data, 
+         aes(x = Decade, y = Area_km2, fill = SSP_clean)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_hline(yintercept = current_area, 
+               linetype = "dashed", 
+               color = "magenta",
+               size = 0.8) +
+    facet_wrap(~Pattern, scales = "free_y", drop = FALSE) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom",
+          plot.title = element_text(size = 10)) +
+    scale_fill_manual(values = c("SSP1-1.9" = "#440154FF",   
+                                "SSP1-2.6" = "#31688EFF",    
+                                "SSP2-4.5" = "#35B779FF",    
+                                "SSP3-7.0" = "#90D743FF",    
+                                "SSP5-8.5" = "#FDE725FF"),
+                      na.value = "grey50") +
+    labs(title = territory,
+         x = "Decade", 
+         y = "Area (km²)",
+         fill = "SSP Scenario")
+}
+
+# Create individual plots for combination
+plot_list_corrected <- list()
+for(territory in territories) {
+  plot <- create_bar_plot_corrected(area_results_high_corrected, territory)
+  if(!is.null(plot)) {
+    plot_list_corrected[[territory]] <- plot
+  }
+}
+
+# Create combined plot if we have plots to combine
+if(length(plot_list_corrected) > 0) {
+  tryCatch({
+    # Combine plots - vertical arrangement
+    if(length(plot_list_corrected) >= 3) {
+      final_plot_vertical <- plot_list_corrected[[1]] / plot_list_corrected[[2]] / plot_list_corrected[[3]] +
+        plot_layout(guides = "collect") & 
+        theme(legend.position = "bottom")
+    } else if(length(plot_list_corrected) == 2) {
+      final_plot_vertical <- plot_list_corrected[[1]] / plot_list_corrected[[2]] +
+        plot_layout(guides = "collect") & 
+        theme(legend.position = "bottom")
+    } else {
+      final_plot_vertical <- plot_list_corrected[[1]]
+    }
+    
+    final_plot_vertical <- final_plot_vertical +
+      plot_annotation(
+        title = "Comparison of High Confidence Areas Across Marine Territories (CORRECTED)",
+        subtitle = "High Seas now properly excludes terrestrial areas | magenta line = Current usage",
+        theme = theme(plot.title = element_text(size = 14, hjust = 0.5))
+      )
+    
+    ggsave(here("Figures", "Marine_territory_plots_CORRECTED", "combined_territories_bars_vertical_CORRECTED.png"), 
+           final_plot_vertical, 
+           width = 12, 
+           height = 18)
+    
+    cat("Successfully created combined territory plot\n")
+    
+  }, error = function(e) {
+    cat("Error creating combined plot:", e$message, "\n")
+  })
+}
+
+# STEP 6: SUMMARY ANALYSES
+# Summary table
+summary_table_corrected <- area_results_high_corrected %>%
+  group_by(Marine_Zone_Clean, Pattern, SSP_clean, Decade) %>%
+  summarize(
+    Area_km2 = sum(Area_km2, na.rm = TRUE),
+    Percent_of_Current = (Area_km2 / current_area) * 100,
+    .groups = "drop"
+  )
+
+# Threshold analysis - when areas drop below current usage
+threshold_analysis_corrected <- area_results_high_corrected %>%
+  group_by(Marine_Zone_Clean, Pattern, SSP_clean) %>%
+  arrange(Decade) %>%
+  mutate(
+    Below_Current = Area_km2 < current_area,
+    First_Below = if_else(Below_Current & !lag(Below_Current, default = FALSE), 
+                         Decade, NA_character_)
+  ) %>%
+  summarize(
+    First_Decade_Below = na.omit(First_Below)[1],
+    Minimum_Area = min(Area_km2, na.rm = TRUE),
+    Maximum_Area = max(Area_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Status = case_when(
+      is.na(First_Decade_Below) & Minimum_Area >= current_area ~ "Always above current area",
+      is.na(First_Decade_Below) & Minimum_Area < current_area ~ "Already below current area",
+      TRUE ~ paste("Drops below current area in", First_Decade_Below)
+    )
+  )
+
+# Save analyses
+write.csv(summary_table_corrected, 
+          here("Figures", "Marine_territory_plots_CORRECTED", "area_percentage_summary_CORRECTED.csv"), 
+          row.names = FALSE)
+
+write.csv(threshold_analysis_corrected, 
+          here("Figures", "Marine_territory_plots_CORRECTED", "threshold_analysis_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Create percentage change over time plot
+tryCatch({
+  percentage_change_plot <- ggplot(summary_table_corrected, 
+         aes(x = Decade, 
+             y = Percent_of_Current, 
+             color = SSP_clean,
+             group = SSP_clean)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    facet_grid(Pattern ~ Marine_Zone_Clean, scales = "free_y") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom") +
+    scale_color_manual(values = c("SSP1-1.9" = "#440154FF",   
+                                 "SSP1-2.6" = "#31688EFF",    
+                                 "SSP2-4.5" = "#35B779FF",    
+                                 "SSP3-7.0" = "#90D743FF",    
+                                 "SSP5-8.5" = "#FDE725FF"),
+                       na.value = "grey50") +
+    labs(title = "Percentage of Current Area Available Over Time",
+         subtitle = paste("Current area:", current_area, "km² | High Seas calculations now exclude terrestrial areas"),
+         x = "Decade",
+         y = "Percentage of Current Area (%)",
+         color = "SSP Scenario") +
+    geom_hline(yintercept = 100, 
+               linetype = "dashed", 
+               color = "magenta", 
+               linewidth = 0.5)
+  
+  ggsave(here("Figures", "Marine_territory_plots_CORRECTED", "percentage_change_over_time_CORRECTED.png"), 
+         percentage_change_plot,
+         width = 15, 
+         height = 8)
+  
+  cat("Successfully created percentage change plot\n")
+  
+}, error = function(e) {
+  cat("Error creating percentage change plot:", e$message, "\n")
+})
+
+# STEP 7: FINAL SUMMARY
+cat("\n=== CORRECTED MARINE ZONE ANALYSIS COMPLETE ===\n")
+cat("- Data:", here("output_data", "ESM_Agreement_Plots_Area_CORRECTED"), "\n")
+cat("- Plots:", here("Figures", "Marine_territory_plots_CORRECTED"), "\n")
+
+if(exists("threshold_analysis_corrected")) {
+  cat("\nThreshold Analysis Summary:\n")
+  print(threshold_analysis_corrected)
+}
+
+cat("\nProcessing completed successfully!\n")
+```
+
+
+```{r}
+# Load your CSV data
+area_results_sum <- read_csv(here("output_data/ESM_Agreement_Plots_Area_CORRECTED/area_results_marine_zones_CORRECTED.csv"), show_col_types = FALSE)
+```
+
+```{r}
+# Create a dataframe for the current aquaculture value
+current_aqua <- data.frame(
+  Decade = "Current",
+  High_Confidence_km2 = 25.88,
+  SSP = "Current",
+  Pattern = "suitable"
+)
+```
+
+```{r}
+# Combine with your main data
+df_combined <- area_results_sum %>%
+  select(SSP, Decade, Pattern, High_Confidence_km2) %>%
+  rbind(current_aqua)
+```
+
+#GOOD plot of the amount of area available currently and along the decades to come in each SSP for each pattern
+
+```{r}
+current_aqua <- data.frame(
+  Decade = "Current",
+  High_Confidence_km2 = 25.88,
+  SSP = "Current",
+  Pattern = "suitable"
+)
+# Combine with your main data
+df_combined <- area_results_sum %>%
+  select(SSP, Decade, Pattern, High_Confidence_km2) %>%
+  rbind(current_aqua)
+
+# Define the order of decades you want
+decade_order <- c("Current", "2021_2030", "2031_2040", "2041_2050", "2051_2060", 
+                 "2061_2070", "2071_2080", "2081_2090", "2091_2100")
+
+line_plot_area_available<- ggplot(df_combined, aes(x = Decade, y = High_Confidence_km2, 
+                        color = SSP, 
+                        linetype = Pattern)) +
+  geom_line(aes(group = interaction(SSP, Pattern))) +
+  geom_point() +
+  scale_color_viridis(discrete = TRUE) +
+  scale_linetype_manual(values = c("dashed", "solid")) +
+  scale_x_discrete(limits = decade_order) +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    x = "Decade",
+    y = "Area (km²)",
+    color = "SSP Scenario",
+    linetype = "Pattern"
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(here("Figures/Area_plot/Combined_area_line_plot.png"), 
+       plot = line_plot_area_available, width = 10, height = 6)
+```
+
+```{r}
+# First, arrange the data by SSP, Pattern, and Decade
+area_results_sum <- area_results_sum %>%
+  arrange(SSP, Pattern, Decade)
+
+# Calculate percentage change for each decade relative to the first decade
+area_results_sum <- area_results_sum %>%
+  group_by(SSP, Pattern) %>%
+  mutate(
+    first_value = first(High_Confidence_km2),
+    percentage_area_loss = ((High_Confidence_km2 - first_value) / first_value) * 100  # This is the modified line
+  ) %>%
+  ungroup()
+
+# Now create the plot
+line_plot_decadal_loss <- ggplot(area_results_sum, aes(x = Decade, y = percentage_area_loss, 
+                            color = SSP, 
+                            linetype = Pattern)) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "gray50") +  # Reference line at 0% change
+  geom_line(aes(group = interaction(SSP, Pattern))) +
+  geom_point() +
+  scale_color_viridis(discrete = TRUE) +
+  scale_linetype_manual(values = c("dashed", "solid")) +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    x = "Decade",
+    y = "Percentage Change in Area (%)",
+    color = "SSP Scenario",
+    linetype = "Pattern"
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(here("Figures/Area_plot/line_plot_decadal_loss.png"), 
+       plot = line_plot_decadal_loss, width = 10, height = 6)
+```
+
+
+# Go to code 15_climate_MSP_combined_analysis_viridis_EF_Oct25 to overlap constraints with climate calculations
+

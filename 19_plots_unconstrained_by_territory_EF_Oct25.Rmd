@@ -1,0 +1,1145 @@
+---
+title: "19_plots_unconstrained_by_territory_EF_Oct25"
+date: 1st version "2025-07-14" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+#create the net availability and run 
+```{r}
+# Load required libraries
+library(tidyverse)
+library(viridis)
+library(scales)
+library(here)
+
+# Check if corrected data exists, if not, use the main corrected data to create it
+net_availability_path <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "additional_plots", "net_availability_analysis_CORRECTED.csv")
+constraint_impact_path <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv")
+
+# If the constraint impact analysis files don't exist, create them from the main corrected data
+if (!file.exists(net_availability_path) || !file.exists(constraint_impact_path)) {
+  cat("Corrected constraint impact analysis files not found. Creating from main corrected data...\n")
+  
+  # Create directories
+  dir.create(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "additional_plots"), 
+             recursive = TRUE, showWarnings = FALSE)
+  
+  # Load the main corrected data
+  area_results_corrected <- read.csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+  
+  # Create net availability analysis
+  net_availability_corrected <- area_results_corrected %>%
+    mutate(
+      # Calculate net availability (can be negative if constraints > high confidence)
+      Net_Available_km2 = High_Confidence_km2 - Unsuitable_Constraints_km2,
+      # Convert to percentage of total zone area
+      Total_Zone_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + 
+                           High_Confidence_km2 + Unsuitable_Constraints_km2,
+      Net_Available_Pct = Net_Available_km2 / Total_Zone_Area_km2 * 100,
+      # Add categorical variable for easier interpretation
+      Availability_Status = case_when(
+        Net_Available_km2 > 0 ~ "Net Positive",
+        Net_Available_km2 < 0 ~ "Net Negative",
+        TRUE ~ "Neutral"
+      )
+    )
+  
+  # Create constraint impact analysis
+  constraint_impact_corrected <- area_results_corrected %>%
+    group_by(SSP, Decade, Pattern, Marine_Zone) %>%
+    # Calculate various metrics
+    summarize(
+      # Total climate suitable area (all confidence levels)
+      Climate_Suitable_km2 = sum(Low_Confidence_km2, Medium_Confidence_km2, High_Confidence_km2, na.rm = TRUE),
+      # High confidence area specifically
+      High_Confidence_km2 = sum(High_Confidence_km2, na.rm = TRUE),
+      # Constraint area
+      Constraint_Area_km2 = sum(Unsuitable_Constraints_km2, na.rm = TRUE),
+      # Total area of the zone
+      Total_Zone_Area_km2 = sum(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+                              High_Confidence_km2, Unsuitable_Constraints_km2, na.rm = TRUE),
+      # Calculate percentages and ratios
+      Suitable_Percentage = Climate_Suitable_km2 / Total_Zone_Area_km2 * 100,
+      High_Conf_Percentage = High_Confidence_km2 / Total_Zone_Area_km2 * 100,
+      Constraint_Percentage = Constraint_Area_km2 / Total_Zone_Area_km2 * 100,
+      .groups = "drop"
+    ) %>%
+    # For cleaner plotting, create decade order
+    mutate(
+      Decade_num = as.numeric(gsub("_.*", "", Decade)),
+      Decade = factor(Decade, levels = unique(Decade[order(Decade_num)]))
+    )
+  
+  # Save the created files
+  write.csv(net_availability_corrected, net_availability_path, row.names = FALSE)
+  write.csv(constraint_impact_corrected, constraint_impact_path, row.names = FALSE)
+  
+  cat("Created corrected constraint impact analysis files.\n")
+} else {
+  # Load existing corrected data
+  net_availability_corrected <- read.csv(net_availability_path)
+  constraint_impact_corrected <- read.csv(constraint_impact_path)
+}
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create output directory for corrected plots
+data_folder <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "plots")
+dir.create(data_folder, recursive = TRUE, showWarnings = FALSE)
+
+# Prepare the constrained data (net available after constraints) - CORRECTED
+constrained_data_corrected <- net_availability_corrected %>%
+  dplyr::select(SSP, Decade, Pattern, Marine_Zone, Net_Available_km2) %>%
+  mutate(
+    SSP = factor(SSP, levels = c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")),
+    Pattern = factor(Pattern, levels = c("suitable", "optimal")),
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Data_Type = "Constrained",
+    Area_km2 = pmax(Net_Available_km2, 0) # Set negative values to 0 for plotting
+  )
+
+# Prepare the unconstrained data (high confidence climate analogues) - CORRECTED
+unconstrained_data_corrected <- constraint_impact_corrected %>%
+  dplyr::select(SSP, Decade, Pattern, Marine_Zone, High_Confidence_km2) %>%
+  mutate(
+    SSP = factor(SSP, levels = c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")),
+    Pattern = factor(Pattern, levels = c("suitable", "optimal")),
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters",
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Data_Type = "Unconstrained",
+    Area_km2 = High_Confidence_km2
+  )
+
+# Combine both datasets - CORRECTED
+combined_data_corrected <- bind_rows(
+  constrained_data_corrected %>% dplyr::select(SSP, Decade, Pattern, Marine_Zone, Data_Type, Area_km2),
+  unconstrained_data_corrected %>% dplyr::select(SSP, Decade, Pattern, Marine_Zone, Data_Type, Area_km2)
+) %>%
+  mutate(
+    Decade_num = as.numeric(str_extract(Decade, "\\d{4}")),
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5"
+    ),
+    Pattern_Type = paste(Pattern, Data_Type, sep = "_")
+  )
+
+# Create the corrected plot with matching viridis colors
+area_comparison_plot_corrected <- ggplot(combined_data_corrected, aes(x = Decade_num, y = Area_km2, color = SSP_label)) +
+  # Add current usage reference line
+  geom_hline(yintercept = current_usage, color = "black", linetype = "dotted", linewidth = 1, alpha = 0.7) +
+  
+  # Add lines for each pattern and data type
+  geom_line(aes(linetype = Pattern_Type), linewidth = 1, alpha = 0.8) +
+  geom_point(size = 2, alpha = 0.8) +
+  
+  # Facet by marine territory (ordered: State Waters, Commonwealth Waters, High Seas)
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Use the same viridis plasma colors as your other plots
+  scale_color_manual(
+    name = "SSP Scenario",
+    values = c(
+      "SSP1-1.9" = "#0d0887", 
+      "SSP1-2.6" = "#8606a6",  
+      "SSP2-4.5" = "#c03a83",   
+      "SSP3-7.0" = "#e76f5a",   
+      "SSP5-8.5" = "#fcd225"     
+    )
+  ) +
+  
+  # Configure line types
+  scale_linetype_manual(
+    name = "Pattern & Constraints",
+    values = c(
+      "suitable_Constrained" = "solid",
+      "optimal_Constrained" = "dashed",
+      "suitable_Unconstrained" = "dotdash", 
+      "optimal_Unconstrained" = "longdash"
+    ),
+    labels = c(
+      "suitable_Constrained" = "Suitable (Constrained)",
+      "optimal_Constrained" = "Optimal (Constrained)",
+      "suitable_Unconstrained" = "Suitable (Unconstrained)",
+      "optimal_Unconstrained" = "Optimal (Unconstrained)"
+    )
+  ) +
+  
+  # Format axes
+  scale_x_continuous(
+    name = "Decade",
+    breaks = seq(2020, 2100, 20),
+    labels = seq(2020, 2100, 20)
+  ) +
+  scale_y_continuous(
+    name = "Area (km²)",
+    labels = label_comma()
+  ) +
+  
+  # Customize theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(colour = "grey90"),
+    panel.grid.major.y = element_line(colour = "grey90"),
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  ) +
+  
+  # Add labels with corrected note
+  labs(
+    title = "Climate Analogue Areas: Constrained vs Unconstrained by Marine Territory (CORRECTED)",
+    subtitle = "Comparison of net available area after spatial constraints vs theoretical climate suitable area\nHigh Seas now properly excludes terrestrial areas",
+    caption = "Dotted black line shows current aquaculture usage (25.88 km²)"
+  )
+
+# Display the corrected plot
+print(area_comparison_plot_corrected)
+
+# Save the corrected plot
+ggsave(
+  filename = file.path(data_folder, "area_available_constrained_vs_unconstrained_by_territory_CORRECTED_new.png"),
+  plot = area_comparison_plot_corrected,
+  width = 14, height = 12, dpi = 300, bg = "white"
+)
+
+# Create a version with log scale for better visualization of State Waters
+area_comparison_plot_log_corrected <- area_comparison_plot_corrected +
+  scale_y_continuous(
+    name = "Area (km²) - Log Scale", 
+    labels = label_comma(),
+    trans = "log10"
+  ) +
+  labs(
+    title = "Climate Analogue Areas: Constrained vs Unconstrained by Marine Territory (CORRECTED - Log Scale)",
+    subtitle = "Log scale version for better visualization across all marine zones\nHigh Seas now properly excludes terrestrial areas",
+    caption = "Dotted black line shows current aquaculture usage (25.88 km²)"
+  )
+
+print(area_comparison_plot_log_corrected)
+
+# Save the log scale version
+ggsave(
+  filename = file.path(data_folder, "area_available_constrained_vs_unconstrained_by_territory_log_CORRECTED_new.png"),
+  plot = area_comparison_plot_log_corrected,
+  width = 14, height = 12, dpi = 300, bg = "white"
+)
+
+# Create summary statistics comparing corrected vs uncorrected if original data exists
+original_net_path <- here("output_data", "Climate_MSP_Analysis_2024", "constraint_impact_analysis", "additional_plots", "net_availability_analysis.csv")
+
+if (file.exists(original_net_path)) {
+  # Load original data for comparison
+  net_availability_original <- read.csv(original_net_path)
+  
+  # Create comparison of High Seas areas
+  high_seas_comparison <- bind_rows(
+    net_availability_original %>% 
+      filter(Marine_Zone == "High Seas") %>%
+      dplyr::select(SSP, Decade, Pattern, Net_Available_km2) %>%
+      mutate(Data_Version = "Original (with terrestrial)"),
+    net_availability_corrected %>% 
+      filter(Marine_Zone == "High Seas") %>%
+      dplyr::select(SSP, Decade, Pattern, Net_Available_km2) %>%
+      mutate(Data_Version = "Corrected (marine only)")
+  ) %>%
+  mutate(
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5"
+    ),
+    Decade_num = as.numeric(str_extract(Decade, "\\d{4}"))
+  )
+  
+  # Create comparison plot for High Seas only
+  high_seas_comparison_plot <- ggplot(high_seas_comparison, 
+                                     aes(x = Decade_num, y = pmax(Net_Available_km2, 0), 
+                                         color = SSP_label, linetype = Data_Version)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    facet_wrap(~ Pattern, labeller = labeller(Pattern = c("optimal" = "Optimal", "suitable" = "Suitable"))) +
+    scale_color_manual(
+      name = "SSP Scenario",
+      values = c(
+       "SSP1-1.9" = "#0d0887", 
+      "SSP1-2.6" = "#8606a6",  
+      "SSP2-4.5" = "#c03a83",   
+      "SSP3-7.0" = "#e76f5a",   
+      "SSP5-8.5" = "#fcd225"      
+      )
+    ) +
+    scale_linetype_manual(
+      values = c("Original (with terrestrial)" = "dashed", 
+                "Corrected (marine only)" = "solid"),
+      name = "Data Version"
+    ) +
+    scale_x_continuous(
+      name = "Decade",
+      breaks = seq(2020, 2100, 20),
+      labels = seq(2020, 2100, 20)
+    ) +
+    scale_y_continuous(
+      name = "Net Available Area (km²)",
+      labels = label_comma()
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12)
+    ) +
+    labs(
+      title = "High Seas: Impact of Terrestrial Exclusion on Net Available Area",
+      subtitle = "Comparison between original (with land) and corrected (marine only) calculations",
+      caption = "Corrected version properly excludes terrestrial areas from High Seas calculations"
+    )
+  
+  # Save comparison plot
+  ggsave(
+    filename = file.path(data_folder, "high_seas_net_availability_original_vs_corrected_comparison_new.png"),
+    plot = high_seas_comparison_plot,
+    width = 12, height = 8, dpi = 300, bg = "white"
+  )
+  
+  # Save comparison data
+  write.csv(high_seas_comparison, 
+            file.path(data_folder, "high_seas_net_availability_comparison_data.csv"), 
+            row.names = FALSE)
+  
+  cat("High Seas comparison plot created showing impact of terrestrial exclusion!\n")
+}
+
+# Print summary statistics for corrected data
+cat("CORRECTED DATA ANALYSIS SUMMARY\n")
+cat("===============================\n")
+cat("Key changes:\n")
+cat("- High Seas areas now properly exclude terrestrial areas\n")
+cat("- Net availability calculations use corrected marine boundaries\n")
+cat("- Consistent viridis color scheme maintained\n")
+cat("\n")
+
+# Create summary table
+summary_stats_corrected <- combined_data_corrected %>%
+  group_by(Marine_Zone, Data_Type, Pattern) %>%
+  summarise(
+    Mean_Area = mean(Area_km2, na.rm = TRUE),
+    Max_Area = max(Area_km2, na.rm = TRUE),
+    Min_Area = min(Area_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Marine_Zone, Data_Type, Pattern)
+
+print(summary_stats_corrected)
+
+# Save summary statistics
+write.csv(summary_stats_corrected, 
+          file.path(data_folder, "area_comparison_summary_statistics_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Print confirmation of where files were saved
+cat("\nCorrected figures saved to:", normalizePath(data_folder), "\n")
+cat("Files created:\n")
+cat("- area_available_constrained_vs_unconstrained_by_territory_CORRECTED.png\n")
+cat("- area_available_constrained_vs_unconstrained_by_territory_log_CORRECTED.png\n")
+if (file.exists(original_net_path)) {
+  cat("- high_seas_net_availability_original_vs_corrected_comparison.png\n")
+}
+cat("- area_comparison_summary_statistics_CORRECTED.csv\n")
+```
+
+#make the plots with different colors for unconstrained and constrained climate analogues
+```{r}
+# Load required libraries
+library(tidyverse)
+library(viridis)
+library(scales)
+library(here)
+
+# Check if corrected data exists, if not, use the main corrected data to create it
+net_availability_path <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "additional_plots", "net_availability_analysis_CORRECTED.csv")
+constraint_impact_path <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv")
+
+# If the constraint impact analysis files don't exist, create them from the main corrected data
+if (!file.exists(net_availability_path) || !file.exists(constraint_impact_path)) {
+  cat("Corrected constraint impact analysis files not found. Creating from main corrected data...\n")
+  
+  # Create directories
+  dir.create(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "additional_plots"), 
+             recursive = TRUE, showWarnings = FALSE)
+  
+  # Load the main corrected data
+  area_results_corrected <- read.csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+  
+  # Create net availability analysis
+  net_availability_corrected <- area_results_corrected %>%
+    mutate(
+      # Calculate net availability (can be negative if constraints > high confidence)
+      Net_Available_km2 = High_Confidence_km2 - Unsuitable_Constraints_km2,
+      # Convert to percentage of total zone area
+      Total_Zone_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + 
+                           High_Confidence_km2 + Unsuitable_Constraints_km2,
+      Net_Available_Pct = Net_Available_km2 / Total_Zone_Area_km2 * 100,
+      # Add categorical variable for easier interpretation
+      Availability_Status = case_when(
+        Net_Available_km2 > 0 ~ "Net Positive",
+        Net_Available_km2 < 0 ~ "Net Negative",
+        TRUE ~ "Neutral"
+      )
+    )
+  
+  # Create constraint impact analysis
+  constraint_impact_corrected <- area_results_corrected %>%
+    group_by(SSP, Decade, Pattern, Marine_Zone) %>%
+    # Calculate various metrics
+    summarize(
+      # Total climate suitable area (all confidence levels)
+      Climate_Suitable_km2 = sum(Low_Confidence_km2, Medium_Confidence_km2, High_Confidence_km2, na.rm = TRUE),
+      # High confidence area specifically
+      High_Confidence_km2 = sum(High_Confidence_km2, na.rm = TRUE),
+      # Constraint area
+      Constraint_Area_km2 = sum(Unsuitable_Constraints_km2, na.rm = TRUE),
+      # Total area of the zone
+      Total_Zone_Area_km2 = sum(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+                              High_Confidence_km2, Unsuitable_Constraints_km2, na.rm = TRUE),
+      # Calculate percentages and ratios
+      Suitable_Percentage = Climate_Suitable_km2 / Total_Zone_Area_km2 * 100,
+      High_Conf_Percentage = High_Confidence_km2 / Total_Zone_Area_km2 * 100,
+      Constraint_Percentage = Constraint_Area_km2 / Total_Zone_Area_km2 * 100,
+      .groups = "drop"
+    ) %>%
+    # For cleaner plotting, create decade order
+    mutate(
+      Decade_num = as.numeric(gsub("_.*", "", Decade)),
+      Decade = factor(Decade, levels = unique(Decade[order(Decade_num)]))
+    )
+  
+  # Save the created files
+  write.csv(net_availability_corrected, net_availability_path, row.names = FALSE)
+  write.csv(constraint_impact_corrected, constraint_impact_path, row.names = FALSE)
+  
+  cat("Created corrected constraint impact analysis files.\n")
+} else {
+  # Load existing corrected data
+  net_availability_corrected <- read.csv(net_availability_path)
+  constraint_impact_corrected <- read.csv(constraint_impact_path)
+}
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create output directory for corrected plots
+data_folder <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "plots")
+dir.create(data_folder, recursive = TRUE, showWarnings = FALSE)
+
+# Prepare the constrained data (net available after constraints) - CORRECTED
+constrained_data_corrected <- net_availability_corrected %>%
+  dplyr::select(SSP, Decade, Pattern, Marine_Zone, Net_Available_km2) %>%
+  mutate(
+    SSP = factor(SSP, levels = c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")),
+    Pattern = factor(Pattern, levels = c("suitable", "optimal")),
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Data_Type = "Constrained",
+    Area_km2 = pmax(Net_Available_km2, 0) # Set negative values to 0 for plotting
+  )
+
+# Prepare the unconstrained data (high confidence climate analogues) - CORRECTED
+unconstrained_data_corrected <- constraint_impact_corrected %>%
+  dplyr::select(SSP, Decade, Pattern, Marine_Zone, High_Confidence_km2) %>%
+  mutate(
+    SSP = factor(SSP, levels = c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")),
+    Pattern = factor(Pattern, levels = c("suitable", "optimal")),
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters",
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Data_Type = "Unconstrained",
+    Area_km2 = High_Confidence_km2
+  )
+
+# Combine both datasets - CORRECTED
+combined_data_corrected <- bind_rows(
+  constrained_data_corrected %>% dplyr::select(SSP, Decade, Pattern, Marine_Zone, Data_Type, Area_km2),
+  unconstrained_data_corrected %>% dplyr::select(SSP, Decade, Pattern, Marine_Zone, Data_Type, Area_km2)
+) %>%
+  mutate(
+    Decade_num = as.numeric(str_extract(Decade, "\\d{4}")),
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5"
+    ),
+    Pattern_Type = paste(Pattern, Data_Type, sep = "_")
+  )
+
+# Create the corrected plot with side-by-side facets
+area_comparison_plot_corrected <- ggplot(combined_data_corrected, aes(x = Decade_num, y = Area_km2, color = SSP_label)) +
+  # Add current usage reference line
+  geom_hline(yintercept = current_usage, color = "black", linetype = "dotted", linewidth = 1, alpha = 0.7) +
+  
+  # Add lines for each pattern
+  geom_line(aes(linetype = Pattern), linewidth = 1, alpha = 0.8) +
+  geom_point(size = 2, alpha = 0.8) +
+  
+  # Facet by marine territory AND data type (side by side)
+  facet_grid(Marine_Zone ~ Data_Type, scales = "free_y") +
+  
+  # Use the same viridis colors for both constrained and unconstrained
+  scale_color_manual(
+    name = "SSP Scenario",
+    values = c(
+      "SSP1-1.9" = "#0d0887", 
+      "SSP1-2.6" = "#8606a6",  
+      "SSP2-4.5" = "#c03a83",   
+      "SSP3-7.0" = "#e76f5a",   
+      "SSP5-8.5" = "#fcd225"   
+    )
+  ) +
+  
+  # Configure line types for patterns
+  scale_linetype_manual(
+    name = "Pattern",
+    values = c("suitable" = "solid", "optimal" = "dashed"),
+    labels = c("suitable" = "Suitable", "optimal" = "Optimal")
+  ) +
+  
+  # Format axes
+  scale_x_continuous(
+    name = "Decade",
+    breaks = seq(2020, 2100, 20),
+    labels = seq(2020, 2100, 20)
+  ) +
+  scale_y_continuous(
+    name = "Area (km²)",
+    labels = label_comma()
+  ) +
+  
+  # Customize theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(colour = "grey90"),
+    panel.grid.major.y = element_line(colour = "grey90"),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  ) +
+  
+  # Add labels with corrected note
+  labs(
+    title = "Climate Analogue Areas: Constrained vs Unconstrained by Marine Territory (CORRECTED)",
+    subtitle = "Side-by-side comparison of net available area after spatial constraints vs theoretical climate suitable area\nHigh Seas now properly excludes terrestrial areas",
+    caption = "Dotted black line shows current aquaculture usage (25.88 km²)"
+  )
+
+# Display the corrected plot
+print(area_comparison_plot_corrected)
+
+# Save the corrected plot
+ggsave(
+  filename = file.path(data_folder, "area_available_constrained_vs_unconstrained_by_territory_CORRECTED_new.png"),
+  plot = area_comparison_plot_corrected,
+  width = 14, height = 12, dpi = 300, bg = "white"
+)
+
+# Create alternative version with different visual styling for constrained vs unconstrained
+area_comparison_plot_dual_colors <- ggplot() +
+  # Add current usage reference line
+  geom_hline(yintercept = current_usage, color = "black", linetype = "dotted", linewidth = 1, alpha = 0.7) +
+  
+  # Add UNCONSTRAINED data with viridis colors and lines
+  geom_line(data = combined_data_corrected %>% filter(Data_Type == "Unconstrained"),
+            aes(x = Decade_num, y = Area_km2, color = SSP_label, linetype = Pattern), 
+            linewidth = 1.2, alpha = 0.9) +
+  geom_point(data = combined_data_corrected %>% filter(Data_Type == "Unconstrained"),
+             aes(x = Decade_num, y = Area_km2, color = SSP_label), 
+             size = 2.5, alpha = 0.9) +
+  
+  # Add CONSTRAINED data with magma colors and different point shapes
+  geom_line(data = combined_data_corrected %>% filter(Data_Type == "Constrained"),
+            aes(x = Decade_num, y = Area_km2, color = SSP_label, linetype = Pattern), 
+            linewidth = 1, alpha = 0.7, linetype = "dotted") +
+  geom_point(data = combined_data_corrected %>% filter(Data_Type == "Constrained"),
+             aes(x = Decade_num, y = Area_km2, fill = SSP_label), 
+             size = 2.5, alpha = 0.8, shape = 21, color = "white", stroke = 0.8) +
+  
+  # Facet by marine territory AND data type
+  facet_grid(Marine_Zone ~ Data_Type, scales = "free_y") +
+  
+  # Use viridis colors for lines (unconstrained)
+  scale_color_manual(
+    name = "SSP Scenario",
+    values = c(
+       "SSP1-1.9" = "#0d0887", 
+      "SSP1-2.6" = "#8606a6",  
+      "SSP2-4.5" = "#c03a83",   
+      "SSP3-7.0" = "#e76f5a",   
+      "SSP5-8.5" = "#fcd225"   
+    )
+  ) +
+  
+  # Use magma colors for filled points (constrained)
+  scale_fill_manual(
+    name = "SSP Scenario",
+    values = c(
+      "SSP1-1.9" = "#000004FF",   # magma dark purple
+      "SSP1-2.6" = "#721F81FF",    # magma purple 
+      "SSP2-4.5" = "#B63679FF",    # magma pink
+      "SSP3-7.0" = "#F1605DFF",    # magma orange
+      "SSP5-8.5" = "#FCFDBFFF"     # magma light yellow
+    ),
+    guide = "none"  # Hide this legend since it's redundant
+  ) +
+  
+  # Configure line types for patterns
+  scale_linetype_manual(
+    name = "Pattern",
+    values = c("suitable" = "solid", "optimal" = "dashed"),
+    labels = c("suitable" = "Suitable", "optimal" = "Optimal")
+  ) +
+  
+  # Format axes
+  scale_x_continuous(
+    name = "Decade",
+    breaks = seq(2020, 2100, 20),
+    labels = seq(2020, 2100, 20)
+  ) +
+  scale_y_continuous(
+    name = "Area (km²)",
+    labels = label_comma()
+  ) +
+  
+  # Customize theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(colour = "grey90"),
+    panel.grid.major.y = element_line(colour = "grey90"),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  ) +
+  
+  # Add labels
+  labs(
+    title = "Climate Analogue Areas: Dual Visual Style Comparison (CORRECTED)",
+    subtitle = "Unconstrained: Solid lines & filled circles (viridis colors) | Constrained: Dotted lines & outlined circles (magma fills)\nHigh Seas now properly excludes terrestrial areas",
+    caption = "Dotted black line shows current aquaculture usage (25.88 km²)"
+  )
+area_comparison_plot_log_corrected <- area_comparison_plot_corrected +
+  scale_y_continuous(
+    name = "Area (km²) - Log Scale", 
+    labels = label_comma(),
+    trans = "log10"
+  ) +
+  labs(
+    title = "Climate Analogue Areas: Constrained vs Unconstrained by Marine Territory (CORRECTED - Log Scale)",
+    subtitle = "Log scale version for better visualization across all marine zones\nHigh Seas now properly excludes terrestrial areas",
+    caption = "Dotted black line shows current aquaculture usage (25.88 km²)"
+  )
+
+print(area_comparison_plot_log_corrected)
+
+# Save the log scale version
+ggsave(
+  filename = file.path(data_folder, "area_available_constrained_vs_unconstrained_by_territory_log_CORRECTED_new.png"),
+  plot = area_comparison_plot_log_corrected,
+  width = 14, height = 12, dpi = 300, bg = "white"
+)
+
+# Create summary statistics comparing corrected vs uncorrected if original data exists
+original_net_path <- here("output_data", "Climate_MSP_Analysis_2024", "constraint_impact_analysis", "additional_plots", "net_availability_analysis.csv")
+
+if (file.exists(original_net_path)) {
+  # Load original data for comparison
+  net_availability_original <- read.csv(original_net_path)
+  
+  # Create comparison of High Seas areas
+  high_seas_comparison <- bind_rows(
+    net_availability_original %>% 
+      filter(Marine_Zone == "High Seas") %>%
+      dplyr::select(SSP, Decade, Pattern, Net_Available_km2) %>%
+      mutate(Data_Version = "Original (with terrestrial)"),
+    net_availability_corrected %>% 
+      filter(Marine_Zone == "High Seas") %>%
+      dplyr::select(SSP, Decade, Pattern, Net_Available_km2) %>%
+      mutate(Data_Version = "Corrected (marine only)")
+  ) %>%
+  mutate(
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5"
+    ),
+    Decade_num = as.numeric(str_extract(Decade, "\\d{4}"))
+  )
+  
+  # Create comparison plot for High Seas only
+  high_seas_comparison_plot <- ggplot(high_seas_comparison, 
+                                     aes(x = Decade_num, y = pmax(Net_Available_km2, 0), 
+                                         color = SSP_label, linetype = Data_Version)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    facet_wrap(~ Pattern, labeller = labeller(Pattern = c("optimal" = "Optimal", "suitable" = "Suitable"))) +
+    scale_color_manual(
+      name = "SSP Scenario",
+      values = c(
+      "SSP1-1.9" = "#0d0887", 
+      "SSP1-2.6" = "#8606a6",  
+      "SSP2-4.5" = "#c03a83",   
+      "SSP3-7.0" = "#e76f5a",   
+      "SSP5-8.5" = "#fcd225"   
+      )
+    ) +
+    scale_linetype_manual(
+      values = c("Original (with terrestrial)" = "dashed", 
+                "Corrected (marine only)" = "solid"),
+      name = "Data Version"
+    ) +
+    scale_x_continuous(
+      name = "Decade",
+      breaks = seq(2020, 2100, 20),
+      labels = seq(2020, 2100, 20)
+    ) +
+    scale_y_continuous(
+      name = "Net Available Area (km²)",
+      labels = label_comma()
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12)
+    ) +
+    labs(
+      title = "High Seas: Impact of Terrestrial Exclusion on Net Available Area",
+      subtitle = "Comparison between original (with land) and corrected (marine only) calculations",
+      caption = "Corrected version properly excludes terrestrial areas from High Seas calculations"
+    )
+  
+  # Save comparison plot
+  ggsave(
+    filename = file.path(data_folder, "high_seas_net_availability_original_vs_corrected_comparison_new.png"),
+    plot = high_seas_comparison_plot,
+    width = 12, height = 8, dpi = 300, bg = "white"
+  )
+  
+  # Save comparison data
+  write.csv(high_seas_comparison, 
+            file.path(data_folder, "high_seas_net_availability_comparison_data.csv"), 
+            row.names = FALSE)
+  
+  cat("High Seas comparison plot created showing impact of terrestrial exclusion!\n")
+}
+
+# Print summary statistics for corrected data
+cat("CORRECTED DATA ANALYSIS SUMMARY\n")
+cat("===============================\n")
+cat("Key changes:\n")
+cat("- High Seas areas now properly exclude terrestrial areas\n")
+cat("- Net availability calculations use corrected marine boundaries\n")
+cat("- Consistent viridis color scheme maintained\n")
+cat("\n")
+
+# Create summary table
+summary_stats_corrected <- combined_data_corrected %>%
+  group_by(Marine_Zone, Data_Type, Pattern) %>%
+  summarise(
+    Mean_Area = mean(Area_km2, na.rm = TRUE),
+    Max_Area = max(Area_km2, na.rm = TRUE),
+    Min_Area = min(Area_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Marine_Zone, Data_Type, Pattern)
+
+print(summary_stats_corrected)
+
+# Save summary statistics
+write.csv(summary_stats_corrected, 
+          file.path(data_folder, "area_comparison_summary_statistics_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Print confirmation of where files were saved
+cat("\nCorrected figures saved to:", normalizePath(data_folder), "\n")
+cat("Files created:\n")
+cat("- area_available_constrained_vs_unconstrained_by_territory_CORRECTED.png\n")
+cat("- area_available_constrained_vs_unconstrained_by_territory_log_CORRECTED.png\n")
+if (file.exists(original_net_path)) {
+  cat("- high_seas_net_availability_original_vs_corrected_comparison.png\n")
+}
+cat("- area_comparison_summary_statistics_CORRECTED.csv\n")
+```
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(viridis)
+library(scales)
+library(here)
+library(patchwork)
+
+# ===========================
+# STEP 1: Load and prepare base data
+# ===========================
+
+# Load your CSV data
+area_results_sum <- read_csv(
+  here("output_data/ESM_Agreement_Plots_Area_CORRECTED/area_results_marine_zones_CORRECTED.csv"), 
+  show_col_types = FALSE
+)
+
+# Create current aquaculture reference
+current_aqua <- data.frame(
+  Decade = "Current",
+  High_Confidence_km2 = 25.88,
+  SSP = "Current",
+  Pattern = "suitable",
+  Marine_Zone = "Total"
+)
+
+# ===========================
+# STEP 2: Create df_combined properly
+# ===========================
+
+# Sum across all marine zones to get totals
+df_combined <- area_results_sum %>%
+  group_by(SSP, Decade, Pattern) %>%
+  summarise(High_Confidence_km2 = sum(High_Confidence_km2, na.rm = TRUE), 
+            .groups = "drop") %>%
+  bind_rows(current_aqua %>% select(SSP, Decade, Pattern, High_Confidence_km2))
+
+# Define decade order
+decade_order <- c("Current", "2021_2030", "2031_2040", "2041_2050", 
+                  "2051_2060", "2061_2070", "2071_2080", 
+                  "2081_2090", "2091_2100")
+
+# ===========================
+# STEP 3: Prepare zone-level data
+# ===========================
+
+# Prepare individual zone data with SSP labels
+zone_data <- area_results_sum %>%
+  mutate(
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5"
+    ),
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters",
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Decade_factor = factor(Decade, levels = decade_order[-1]),  # Exclude "Current"
+    Area_km2 = High_Confidence_km2
+  )
+
+# ===========================
+# STEP 4: Helper function for decade formatting
+# ===========================
+
+format_decades <- function(decade_factor) {
+  decade_str <- as.character(decade_factor)
+  decade_str <- str_replace_all(decade_str, "_", "-")
+  factor(decade_str, 
+         levels = c("2021-2030", "2031-2040", "2041-2050", 
+                   "2051-2060", "2061-2070", "2071-2080", 
+                   "2081-2090", "2091-2100"))
+}
+
+# ===========================
+# STEP 5: Create combined dataset for unified plots
+# ===========================
+
+# Prepare total data
+total_data <- df_combined %>%
+  filter(Decade != "Current") %>%
+  mutate(
+    Marine_Zone = "Total Area",
+    SSP_label = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6", 
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    Decade_factor = factor(Decade, levels = decade_order[-1]),
+    Area_km2 = High_Confidence_km2
+  ) %>%
+  select(SSP_label, Decade_factor, Pattern, Marine_Zone, Area_km2)
+
+# Combine total and zone data
+all_data <- bind_rows(
+  total_data,
+  zone_data %>% select(SSP_label, Decade_factor, Pattern, Marine_Zone, Area_km2)
+) %>%
+  mutate(Decade_factor = format_decades(Decade_factor))
+
+# ===========================
+# STEP 6: Define color palette to match original
+# ===========================
+
+# Matching your original plot's colors (viridis)
+ssp_colors_viridis <- c(
+  "SSP1-1.9" = "#440154",  # Dark purple
+  "SSP1-2.6" = "#31688E",  # Blue
+  "SSP2-4.5" = "#35B779",  # Teal/cyan
+  "SSP3-7.0" = "#90D743",  # Light green
+  "SSP5-8.5" = "#FDE725"   # Yellow
+)
+
+# Alternative color scheme (plasma)
+ssp_colors_plasma <- c(
+  "SSP1-1.9" = "#0d0887",  # Deep purple
+  "SSP1-2.6" = "#8606a6",  # Purple
+  "SSP2-4.5" = "#c03a83",  # Pink
+  "SSP3-7.0" = "#e76f5a",  # Orange
+  "SSP5-8.5" = "#fcd225"   # Yellow
+)
+
+# ===========================
+# STEP 7: Create unified faceted plot (absolute area) - VIRIDIS
+# ===========================
+
+unified_plot_viridis <- ggplot(all_data, aes(x = Decade_factor, y = Area_km2, 
+                                    color = SSP_label, linetype = Pattern)) +
+  geom_line(aes(group = interaction(SSP_label, Pattern)), linewidth = 1) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ factor(Marine_Zone, levels = c("Total Area", "State Waters", 
+                                            "Commonwealth Waters", "High Seas")), 
+             scales = "free_y", ncol = 1) +
+  scale_color_manual(values = ssp_colors_viridis, name = "SSP Scenario") +
+  scale_linetype_manual(values = c("suitable" = "dashed", "optimal" = "solid"),
+                       name = "Pattern") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Climate Analogue Areas: Unconstrained Analysis by Marine Zone (Viridis)",
+    x = "Decade",
+    y = "Area (km²)"
+  )
+
+# Display and save
+print(unified_plot_viridis)
+ggsave(here("Figures/Area_plot/Unified_faceted_unconstrained_viridis.png"), 
+       plot = unified_plot_viridis, width = 12, height = 10, dpi = 300, bg = "white")
+
+# ===========================
+# STEP 7B: Create unified faceted plot (absolute area) - PLASMA
+# ===========================
+
+unified_plot_plasma <- ggplot(all_data, aes(x = Decade_factor, y = Area_km2, 
+                                    color = SSP_label, linetype = Pattern)) +
+  geom_line(aes(group = interaction(SSP_label, Pattern)), linewidth = 1) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ factor(Marine_Zone, levels = c("Total Area", "State Waters", 
+                                            "Commonwealth Waters", "High Seas")), 
+             scales = "free_y", ncol = 1) +
+  scale_color_manual(values = ssp_colors_plasma, name = "SSP Scenario") +
+  scale_linetype_manual(values = c("suitable" = "dashed", "optimal" = "solid"),
+                       name = "Pattern") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Climate Analogue Areas: Unconstrained Analysis by Marine Zone (Plasma)",
+    x = "Decade",
+    y = "Area (km²)"
+  )
+
+# Display and save
+print(unified_plot_plasma)
+ggsave(here("Figures/Area_plot/Unified_faceted_unconstrained_plasma.png"), 
+       plot = unified_plot_plasma, width = 12, height = 10, dpi = 300, bg = "white")
+
+# ===========================
+# STEP 8: Calculate percent loss for second plot
+# ===========================
+
+calculate_percent_loss <- function(data) {
+  data %>%
+    group_by(SSP_label, Pattern, Marine_Zone) %>%
+    arrange(Decade_factor) %>%
+    mutate(
+      baseline_area = first(Area_km2),  # 2021-2030 as baseline
+      percent_change = ((Area_km2 - baseline_area) / baseline_area) * 100
+    ) %>%
+    ungroup()
+}
+
+# Apply percent loss calculation
+all_data_loss <- all_data %>%
+  calculate_percent_loss()
+
+# ===========================
+# STEP 9: Create percent loss faceted plot - VIRIDIS
+# ===========================
+
+percent_loss_plot_viridis <- ggplot(all_data_loss, aes(x = Decade_factor, y = percent_change, 
+                                              color = SSP_label, linetype = Pattern)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dotted", alpha = 0.7) +
+  geom_line(aes(group = interaction(SSP_label, Pattern)), linewidth = 1) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ factor(Marine_Zone, levels = c("Total Area", "State Waters", 
+                                            "Commonwealth Waters", "High Seas")), 
+             scales = "free_y", ncol = 1) + 
+  scale_color_manual(values = ssp_colors_viridis, name = "SSP Scenario") +
+  scale_linetype_manual(values = c("suitable" = "dashed", "optimal" = "solid"),
+                       name = "Pattern") +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Climate Analogue Area Change: Percent Loss by Marine Zone (Viridis)",
+    subtitle = "Relative to 2021-2030 baseline (positive = loss, negative = gain)",
+    x = "Decade",
+    y = "Area Change (%)"
+  )
+
+# Display and save
+print(percent_loss_plot_viridis)
+ggsave(here("Figures/Area_plot/Unified_faceted_percent_loss_unconstrained_viridis.png"), 
+       plot = percent_loss_plot_viridis, width = 12, height = 10, dpi = 300, bg = "white")
+
+# ===========================
+# STEP 9B: Create percent loss faceted plot - PLASMA
+# ===========================
+
+percent_loss_plot_plasma <- ggplot(all_data_loss, aes(x = Decade_factor, y = percent_change, 
+                                              color = SSP_label, linetype = Pattern)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dotted", alpha = 0.7) +
+  geom_line(aes(group = interaction(SSP_label, Pattern)), linewidth = 1) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ factor(Marine_Zone, levels = c("Total Area", "State Waters", 
+                                            "Commonwealth Waters", "High Seas")), 
+             scales = "free_y", ncol = 1) + 
+  scale_color_manual(values = ssp_colors_plasma, name = "SSP Scenario") +
+  scale_linetype_manual(values = c("suitable" = "dashed", "optimal" = "solid"),
+                       name = "Pattern") +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Climate Analogue Area Change: Percent Loss by Marine Zone (Plasma)",
+    subtitle = "Relative to 2021-2030 baseline (positive = loss, negative = gain)",
+    x = "Decade",
+    y = "Area Change (%)"
+  )
+
+# Display and save
+print(percent_loss_plot_plasma)
+ggsave(here("Figures/Area_plot/Unified_faceted_percent_loss_unconstrained_plasma.png"), 
+       plot = percent_loss_plot_plasma, width = 12, height = 10, dpi = 300, bg = "white")
+
+# ===========================
+# STEP 10: Print summary statistics
+# ===========================
+
+cat("\n=== SUMMARY STATISTICS ===\n")
+cat("Data successfully loaded and processed!\n")
+cat("Number of SSP scenarios:", length(unique(all_data$SSP_label)), "\n")
+cat("Number of decades:", length(unique(all_data$Decade_factor)), "\n")
+cat("Marine zones:", paste(unique(all_data$Marine_Zone), collapse = ", "), "\n\n")
+
+cat("Plots created:\n")
+cat("1. Unified_faceted_unconstrained_viridis.png (absolute area)\n")
+cat("2. Unified_faceted_unconstrained_plasma.png (absolute area)\n")
+cat("3. Unified_faceted_percent_loss_unconstrained_viridis.png (percent change)\n")
+cat("4. Unified_faceted_percent_loss_unconstrained_plasma.png (percent change)\n\n")
+
+# End-of-century summary
+end_century_summary <- all_data_loss %>%
+  filter(Decade_factor == "2091-2100") %>%
+  select(Marine_Zone, SSP_label, Pattern, percent_change) %>%
+  arrange(Marine_Zone, desc(abs(percent_change)))
+
+cat("End-of-century area change summary (2091-2100):\n")
+print(end_century_summary)
+```
+
+
+#Go to code 20_plots_paper_constrained_by_territory_EF_Oct25
+

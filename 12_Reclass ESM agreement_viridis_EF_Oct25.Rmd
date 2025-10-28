@@ -1,0 +1,679 @@
+---
+title: "Reclassification of the ESM agreement and maps in Viridis-confidence level assessment"
+date: first version"2025-01-16"/ this version 27 Oct 2025
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Summary: In this code we create the maps of the agreement between ESMs and after that we create a composite map with every decade in the X axis and SSPs in the Y axis WITH ONLY CLIMATE ANALOGUES WITHOUT CONSIDERING CONSTRAINTS.
+
+#upload possible packages needed 
+```{r}
+library(terra)
+library(here)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+library(ggplot2)
+library(reshape2)
+library(viridisLite)
+```
+
+#get all the results of the combined analogues and stress category (we named as patterns) such as suitable (1) and then (2) Optimal and sum the amount of models that agree making it more complex we defined as a 
+#No analogue (<25%),
+#Low confidence analogue (≥25% analogue<50% ), 
+#Medium confidence analogue (≥50%<analog<75%),
+#High confidence analogue (≥75%)
+
+```{r}
+#after loading required libraries
+
+# Define SSPs and Patterns
+ssps <- c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")  # SSP scenarios
+patterns <- c("suitable", "optimal")                        # Patterns to combine with "analogue"
+
+# Define Input and Output Directories
+Results_folder <- here("output_data/Combined_Results")  # Input folder
+ESM_Agreement_results_folder <- here("output_data/Combined_Results/ESM_agreement")  # Output folder
+
+# Create the output folder if it doesn't exist
+if (!dir.exists(ESM_Agreement_results_folder)) {
+  dir.create(ESM_Agreement_results_folder, recursive = TRUE)
+}
+
+# Loop through each SSP
+for (ssp in ssps) {
+  
+  # Loop through each pattern
+  for (pattern in patterns) {
+    
+    # Loop through decades with ranges like 2021_2030
+    for (start_year in seq(2021, 2091, by = 10)) {  # Start years for decades
+      end_year <- start_year + 9
+      decade_range <- paste0(start_year, "_", end_year)  # e.g., "2021_2030"
+      
+      # Construct the file path for the combined analogue raster
+      combined_analogue_file <- file.path(Results_folder, paste0(ssp, "_", decade_range, "_analogue_", pattern, "_combined.tif"))
+      
+      # Check if the file exists
+      if (!file.exists(combined_analogue_file)) {
+        message(paste("Missing analogue file:", combined_analogue_file))  # Debug message
+        next  # Skip to the next iteration if the file is missing
+      }
+      
+      # Load the analogue raster
+      analogue_raster <- rast(combined_analogue_file)
+      
+      # Determine the maximum number of models based on SSP
+      max_models <- switch(ssp, 
+                     "ssp119" = 8, 
+                     18)  # For all other SSPs, max_models is set to 18
+      
+      # Define reclassification matrix
+      reclass_matrix <- matrix(c(
+        0, floor(0.25 * max_models), 0,  # <25% -> No-analogue
+        floor(0.25 * max_models),mean(0.50 * max_models) , 1, #≥25% analogue<50% agreement -> low confidence analog
+        mean(0.50 * max_models), ceiling (0.75 * max_models), 2,# ≥50%<analog<75% -> medium confidence analog
+        ceiling(0.75 * max_models), max_models, 3  # ≥75% agreement -> High confidence analogue
+      ), ncol = 3, byrow = TRUE)
+      
+      # Reclassify the raster
+      reclassified_raster <- classify(analogue_raster, reclass_matrix, include.lowest = TRUE)
+      
+      # Save the reclassified raster
+      output_file <- file.path(ESM_Agreement_results_folder, paste0(ssp, "_", decade_range, "_analogue_", pattern, "_ESM_Agreement.tif"))
+      writeRaster(reclassified_raster, output_file, overwrite = TRUE)
+      message(paste("Saved:", output_file))  # Debug message
+    }
+  }
+}
+
+```
+
+#plot the legend by itself to use in figures and presentations
+```{r}
+
+plot.new()  # Creates a blank plot
+legend("center", 
+       legend = c("No analogue (<25%)", "Low confidence analogue (≥25% analogue<50% )", 
+                  "Medium confidence analogue (≥50%<analog<75%)", "High confidence analogue (≥75%)"), 
+       fill = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"), 
+       bty = "n", cex = 1.2)  # Larger text for clarity
+dev.off()
+```
+
+#another legend type could be 
+```{r}
+
+plot.new()  # Creates a blank plot
+legend("center", 
+       legend = c("25% or less", 
+                  "25% to less than 50%", 
+                  "50% to less than 75%", 
+                  "75% or more"), 
+       fill = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"), 
+        title = "percentage of ESMs agree it's an analogue",  # Add legend title
+       bty = "n", cex = 1.2)  # Larger text for clarity
+dev.off()
+```
+#"No analogue (<25%)", "Low confidence analogue (≥25% analogue<50% )", 
+                  "Medium confidence analogue (≥50%<analog<75%)", "High confidence analogue (≥75%)"
+```{r}
+plot.new()  # Creates a blank plot
+legend("topright", inset = c(0.2, 0),  # Move it further outside
+       legend = c("No analogue (<25%)",
+                  "Low confidence analogue (≥25% analogue<50% )", 
+                  "Medium confidence analogue (≥50%<analog<75%)",
+                  "High confidence analogue (≥75%)"), 
+       fill = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"), 
+       title = "ESMs agree it's an analogue",  # Add legend title
+       title.adj = 0,  # Align title to the left
+       xpd = TRUE)
+```
+
+
+#plot the figures themselves in Viridis with tasmania as an overlay
+
+```{r}
+# Load Required Libraries
+library(terra)
+library(here)
+library(sf)  # For reading shapefiles
+
+# Define Input and Output Directories
+ESM_Agreement_results_folder <- here("output_data/Combined_Results/ESM_agreement")
+Plots_folder <- here("Figures/ESM_Agreement_Plots_viridis")
+
+# Define Tasmania shapefile path 
+tasmania_shapefile_path <- here("raw_data/tassie_shp.gpkg")  
+
+# Create Output Directory for Plots if it doesn't exist
+if (!dir.exists(Plots_folder)) {
+  dir.create(Plots_folder, recursive = TRUE)
+}
+
+# Load Tasmania shapefile (only if it exists)
+tasmania_sf <- NULL
+if (file.exists(tasmania_shapefile_path)) {
+  tasmania_sf <- st_read(tasmania_shapefile_path, quiet = TRUE)
+  message("Tasmania shapefile loaded successfully")
+} else {
+  message("Tasmania shapefile not found at: ", tasmania_shapefile_path)
+  message("Please update the path or the plots will be created without the Tasmania overlay")
+}
+
+# List All Reclassified Raster Files
+raster_files <- list.files(ESM_Agreement_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop Through Each Raster File
+for (file in raster_files) {
+  # Read the Raster
+  reclassified_raster <- rast(file)
+  
+  # Extract Filename Components for Plot Title
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- paste(parts[2], parts[3], sep = "_")  # Ensure full range (e.g., "2021_2030")
+  pattern <- parts[5]  # e.g., "optimal"
+  
+  # Define Plot File Path
+  plot_file <- file.path(Plots_folder, paste0(ssp, "_", decade_range, "_analogue_", pattern, "_ESM_Agreement_Plot_viridis.png"))
+  
+  # Open PNG Device
+  png(filename = plot_file, width = 800, height = 600)
+  
+  # Adjust margins: 
+  par(mar = c(1, 1, 1, 1))  # c(bottom, left, top, right)
+  
+  # Plot the raster without legend
+  plot(reclassified_raster, col = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"), legend = FALSE)
+  
+  # Overlay Tasmania shapefile  if available
+  if (!is.null(tasmania_sf)) {
+    plot(st_geometry(tasmania_sf), col = "white", border = "#373737", lwd = 0.5, add = TRUE)
+  }
+  
+  # Add legend
+  legend("topright", inset = c(-0.25, 0),  # Move it further outside
+         legend = c("25% or less", 
+                    "25% to 50%", 
+                    "50% to 75%", 
+                    "75% or more"), 
+         fill = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"), 
+         title = "ESMs agree it's an analogue",  # Add legend title
+         title.adj = 0,  # Align title to the left
+         xpd = TRUE)
+  
+  # Close PNG Device
+  dev.off()
+  
+  # Debug Message
+  message(paste("Saved plot:", plot_file))
+}
+
+print("All plots saved successfully!")
+```
+
+#Composite maps with Viridis
+```{r}
+# Create composite map for ESM Agreement plots with updated legend
+#--------------------------------------------------------------------------
+library(png)
+library(grid)
+library(webshot2)
+library(here)
+
+# Define input and output directories
+plots_folder <- here("Figures/ESM_Agreement_Plots_viridis")
+output_folder <- here("Figures/ESM_Agreement_Plots_viridis")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
+
+# List all PNG files in the plots folder
+plot_files <- list.files(plots_folder, pattern = ".*_ESM_Agreement_Plot_viridis\\.png$", full.names = TRUE)
+
+if (length(plot_files) == 0) {
+  stop("No ESM Agreement plot files found in ", plots_folder)
+}
+
+# Extract metadata from filenames
+extract_metadata <- function(filename) {
+  basename <- basename(filename)
+  parts <- strsplit(basename, "_")[[1]]
+  
+  # Extract SSP, decade, and pattern
+  ssp <- parts[1]
+  decade_start <- parts[2]
+  decade_end <- parts[3]
+  decade_range <- paste(decade_start, decade_end, sep="_")
+  pattern <- parts[5]  # "optimal" or "suitable"
+  
+  return(list(
+    ssp = ssp,
+    decade = decade_range,
+    pattern = pattern,
+    path = filename
+  ))
+}
+
+# Get metadata for all files
+all_metadata <- lapply(plot_files, extract_metadata)
+
+# Get unique patterns, SSPs, and decades
+patterns <- unique(sapply(all_metadata, function(x) x$pattern))
+ssps <- unique(sapply(all_metadata, function(x) x$ssp))
+decades <- unique(sapply(all_metadata, function(x) x$decade))
+
+# Sort them
+ssps <- sort(ssps)
+decades <- sort(decades)
+
+# Process each pattern separately
+for (pattern in patterns) {
+  cat("Creating composite map for pattern:", pattern, "\n")
+  
+  # Filter files for this pattern
+  pattern_metadata <- all_metadata[sapply(all_metadata, function(x) x$pattern == pattern)]
+  
+  # Create individual maps directory for this pattern
+  individual_maps_dir <- file.path(output_folder, paste0("individual_maps_", pattern))
+  if (!dir.exists(individual_maps_dir)) {
+    dir.create(individual_maps_dir, recursive = TRUE)
+  }
+  
+  # Process each file to create standardized individual maps
+  for (metadata in pattern_metadata) {
+    # Extract information
+    ssp <- metadata$ssp
+    decade <- metadata$decade
+    orig_path <- metadata$path
+    
+    # Define output path for the standardized image
+    output_path <- file.path(individual_maps_dir, 
+                            paste0(pattern, "_", ssp, "_", decade, ".png"))
+    
+    # Simply copy the file (we're assuming the images are already well-formatted)
+    file.copy(orig_path, output_path, overwrite = TRUE)
+  }
+  
+  # Create HTML for composite view
+  html_file <- file.path(output_folder, paste0("ESM_Agreement_composite_", pattern, ".html"))
+  
+  html_content <- c(
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head>",
+    paste0("<title>ESM Agreement Composite Map: ", pattern, "</title>"),
+    "<style>",
+    "body { font-family: Arial, sans-serif; margin: 20px; }",
+    "table { border-collapse: collapse; width: 100%; border: 1px solid #ddd; }",
+    "th, td { padding: 0; margin: 0; }",
+    "th { background-color: #f2f2f2; padding: 8px; font-weight: bold; text-align: center; }",
+    "td { position: relative; height: 0; padding-bottom: 12%; /* Force aspect ratio */ }",
+    "img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }",
+    ".title { text-align: center; font-size: 24px; font-weight: bold; margin: 20px 0; }",
+    ".ssp-label { width: 60px; text-align: right; padding-right: 10px; }",
+    ".legend { margin-top: 20px; text-align: center; }",
+    ".legend-item { display: inline-block; margin: 0 10px; }",
+    ".legend-color { display: inline-block; width: 20px; height: 20px; margin-right: 5px; vertical-align: middle; }",
+    "</style>",
+    "</head>",
+    "<body>",
+    paste0("<div class='title'>ESM Agreement for ", toupper(substr(pattern, 1, 1)), 
+           substr(pattern, 2, nchar(pattern)), " climate analogues</div>"),
+    "<table>",
+    "<tr><th></th>"
+  )
+  
+  # Add decade headers
+  for (decade in decades) {
+    html_content <- c(html_content, paste0("<th>", decade, "</th>"))
+  }
+  html_content <- c(html_content, "</tr>")
+  
+  # Add rows with SSP labels and images
+  for (ssp in ssps) {
+    html_content <- c(html_content, "<tr>")
+    html_content <- c(html_content, paste0("<th class='ssp-label'>", ssp, "</th>"))
+    
+    for (decade in decades) {
+      # Path to the image
+      img_path <- paste0("individual_maps_", pattern, "/", 
+                        pattern, "_", ssp, "_", decade, ".png")
+      img_full_path <- file.path(output_folder, img_path)
+      
+      # Check if the image exists
+      if (file.exists(img_full_path)) {
+        html_content <- c(html_content, paste0("<td><img src='", img_path, 
+                                            "' alt='", ssp, " - ", decade, "'></td>"))
+      } else {
+        # Empty cell if image doesn't exist
+        html_content <- c(html_content, "<td style='background-color: #f9f9f9;'></td>")
+      }
+    }
+    
+    html_content <- c(html_content, "</tr>")
+  }
+  
+  # Add legend with updated descriptions
+  html_content <- c(
+    html_content,
+    "</table>",
+    "<div class='legend'>",
+     "<div class='legend-item'><div class='legend-color' style='background-color: #fcd225;'></div>No analogue (&lt;25%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #c03a83;'></div>Low confidence (≥25% to &lt;50%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #8606a6;'></div>Medium confidence(≥50% to &lt;75%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #0d0887;'></div>High confidence (≥75%)</div>",
+    "</div>",
+    "</body>",
+    "</html>"
+  )
+  
+  # Write the HTML file
+  writeLines(html_content, html_file)
+  
+  cat("HTML composite view saved to:", html_file, "\n")
+  
+  # Convert HTML to PNG
+  png_file <- file.path(output_folder, paste0("ESM_Agreement_composite_", pattern, ".png"))
+  
+  # Try to convert HTML to PNG using webshot2
+  tryCatch({
+    webshot2::webshot(
+      url = html_file,
+      file = png_file,
+      delay = 2,  # Wait 2 seconds for everything to render
+      zoom = 2    # Higher resolution
+    )
+    cat("Composite map saved as PNG:", png_file, "\n")
+  }, error = function(e) {
+    cat("Error converting HTML to PNG:", e$message, "\n")
+    cat("Please open the HTML file in a browser and save as PNG manually:\n", html_file, "\n")
+  })
+}
+
+cat("\nAll ESM Agreement composite maps processed!\n")
+```
+
+
+#modern composites #FOR PUBLICATION
+# Note: This script will attempt to use magick for image cropping
+# Install if needed: install.packages("magick")
+```{r}
+#Composite maps with Viridis - Updated with Modern Header Styling
+# Create composite map for ESM Agreement plots with modern header styling
+#--------------------------------------------------------------------------
+library(png)
+library(grid)
+library(webshot2)
+library(here)
+
+# Define input and output directories
+plots_folder <- here("Figures/ESM_Agreement_Plots_viridis")
+output_folder <- here("Figures/ESM_Agreement_Plots_viridis")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
+
+# List all PNG files in the plots folder
+plot_files <- list.files(plots_folder, pattern = ".*_ESM_Agreement_Plot_viridis\\.png$", full.names = TRUE)
+
+if (length(plot_files) == 0) {
+  stop("No ESM Agreement plot files found in ", plots_folder)
+}
+
+# Function to format SSP labels properly
+format_ssp_label <- function(ssp_raw) {
+  # Convert from formats like "ssp119" to "SSP1-1.9"
+  ssp_upper <- toupper(ssp_raw)
+  
+  # Handle different SSP formats
+  if (grepl("SSP119", ssp_upper)) return("SSP1-1.9")
+  if (grepl("SSP126", ssp_upper)) return("SSP1-2.6")
+  if (grepl("SSP245", ssp_upper)) return("SSP2-4.5")
+  if (grepl("SSP370", ssp_upper)) return("SSP3-7.0")
+  if (grepl("SSP585", ssp_upper)) return("SSP5-8.5")
+  
+  # Fallback: return as uppercase if no match
+  return(ssp_upper)
+}
+
+# Function to format decade labels properly
+format_decade_label <- function(decade_raw) {
+  # Convert from formats like "2021_2030" to "2021-2030"
+  parts <- strsplit(decade_raw, "_")[[1]]
+  
+  if (length(parts) == 2) {
+    start_year <- parts[1]
+    end_year <- parts[2]
+    return(paste0(start_year, "-", end_year))
+  }
+  
+  # Fallback: return original if can't parse
+  return(decade_raw)
+}
+
+# Extract metadata from filenames
+extract_metadata <- function(filename) {
+  basename <- basename(filename)
+  parts <- strsplit(basename, "_")[[1]]
+  
+  # Extract SSP, decade, and pattern
+  # Format: ssp119_2021_2030_analogue_optimal_ESM_Agreement_Plot_viridis.png
+  ssp_raw <- parts[1]
+  decade_start <- parts[2]
+  decade_end <- parts[3]
+  decade_range <- paste(decade_start, decade_end, sep="_")
+  pattern <- parts[5]  # "optimal" or "suitable"
+  
+  return(list(
+    ssp = ssp_raw,
+    ssp_formatted = format_ssp_label(ssp_raw),
+    decade = decade_range,
+    decade_formatted = format_decade_label(decade_range),
+    pattern = pattern,
+    path = filename
+  ))
+}
+
+# Get metadata for all files
+all_metadata <- lapply(plot_files, extract_metadata)
+
+# Get unique patterns, SSPs, and decades (using raw values for processing)
+patterns <- unique(sapply(all_metadata, function(x) x$pattern))
+ssps <- unique(sapply(all_metadata, function(x) x$ssp))
+decades <- unique(sapply(all_metadata, function(x) x$decade))
+
+# Sort them
+ssps <- sort(ssps)
+decades <- sort(decades)
+
+# Get formatted versions for display (fix the mapping issue)
+ssps_formatted <- sapply(ssps, function(x) format_ssp_label(x))
+decades_formatted <- sapply(decades, function(x) format_decade_label(x))
+
+# Create proper mapping for sorted display
+ssp_mapping <- setNames(ssps_formatted, ssps)
+decade_mapping <- setNames(decades_formatted, decades)
+
+# Process each pattern separately
+for (pattern in patterns) {
+  cat("Creating composite map for pattern:", pattern, "\n")
+  
+  # Filter files for this pattern
+  pattern_metadata <- all_metadata[sapply(all_metadata, function(x) x$pattern == pattern)]
+  
+  # Create individual maps directory for this pattern (with v3 suffix for new styling)
+  individual_maps_dir <- file.path(output_folder, paste0("individual_maps_", pattern, "_v3"))
+  if (!dir.exists(individual_maps_dir)) {
+    dir.create(individual_maps_dir, recursive = TRUE)
+  }
+  
+  # Process each file to create standardized individual maps
+  for (metadata in pattern_metadata) {
+    # Extract information
+    ssp <- metadata$ssp
+    decade <- metadata$decade
+    orig_path <- metadata$path
+    
+    # Define output path for the standardized image
+    output_path <- file.path(individual_maps_dir, 
+                            paste0(pattern, "_", ssp, "_", decade, ".png"))
+    
+    # Read, crop (to remove borders and keep only map), and save the image
+    tryCatch({
+      library(magick)
+      img <- image_read(orig_path)
+      
+      # Get image dimensions
+      info <- image_info(img)
+      width <- info$width
+      height <- info$height
+      
+      # Crop to remove borders from all sides - CUSTOM cropping
+      # Remove borders: left 15%, right 15%, top 5% (perfect), bottom 5%
+      crop_left <- floor(width * 0.15)     # Start 15% from left
+      crop_top <- floor(height * 0.05)     # Start 5% from top (perfect)
+      crop_width <- floor(width * 0.70)    # Keep 70% of width (15% + 70% = 85%, removing 15% from right)
+      crop_height <- floor(height * 0.90)  # Keep 90% of height (5% + 90% = 95%, removing 5% from bottom)
+      
+      # Crop: geometry format is "WIDTHxHEIGHT+X_OFFSET+Y_OFFSET"
+      crop_geometry <- paste0(crop_width, "x", crop_height, "+", crop_left, "+", crop_top)
+      cropped_img <- image_crop(img, crop_geometry)
+      
+      # Save cropped image
+      image_write(cropped_img, output_path)
+      
+    }, error = function(e) {
+      # If magick fails, just copy the original file
+      cat("Warning: Could not crop image", orig_path, ". Using original.\n")
+      cat("Error:", e$message, "\n")
+      file.copy(orig_path, output_path, overwrite = TRUE)
+    })
+  }
+  
+  # Create HTML for composite view with MODERN STYLING (matching constrained approach)
+  html_file <- file.path(output_folder, paste0("ESM_Agreement_composite_", pattern, "_v3.html"))
+  
+  html_content <- c(
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head>",
+    paste0("<title>", pattern, " Climate Analogues</title>"),
+    "<style>",
+    "* { margin: 0; padding: 0; box-sizing: border-box; }",
+    "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; padding: 15px; }",
+    ".container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }",
+    ".header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; }",
+    ".title { font-size: 28px; font-weight: 600; margin-bottom: 5px; }",
+    ".subtitle { font-size: 14px; opacity: 0.9; }",
+    ".grid-container { display: grid; padding: 0; gap: 2px; background: #e9ecef; border-spacing: 2px; }",
+    paste0(".grid-container { grid-template-columns: 80px repeat(", length(decades), ", 1fr); }"),
+    ".grid-header { background: #495057; color: white; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; padding: 12px 8px; }",
+    ".grid-cell { background: white; position: relative; padding: 2px; border: 1px solid #eee; }",
+    ".grid-cell::after { content: ''; display: block; padding-bottom: 75%; /* Maintain aspect ratio */ }",
+    ".grid-cell img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }",
+    ".row-header { background: #6c757d; color: white; font-weight: 600; font-size: 12px; writing-mode: horizontal-tb; display: flex; align-items: center; justify-content: center; padding: 8px; }",
+    ".legend { padding: 20px; background: #f8f9fa; border-top: 1px solid #dee2e6; }",
+    ".legend-title { font-weight: 600; margin-bottom: 10px; color: #495057; font-size: 14px; }",
+    ".legend-items { display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; }",
+    ".legend-item { display: flex; align-items: center; font-size: 16px; }",
+    ".legend-color { width: 18px; height: 18px; border-radius: 3px; margin-right: 6px; border: 1px solid rgba(0,0,0,0.1); }",
+    "@media (max-width: 768px) { .grid-container { grid-template-columns: 60px repeat(", length(decades), ", 1fr); } .title { font-size: 20px; } }",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<div class='container'>",
+    "<div class='grid-container'>"
+  )
+  
+  # Add headers row with formatted decade labels
+  html_content <- c(html_content, "<div class='grid-header'></div>") # Empty corner
+  for (decade in decades) {
+    formatted_decade <- decade_mapping[decade]
+    html_content <- c(html_content, paste0("<div class='grid-header'>", formatted_decade, "</div>"))
+  }
+  
+  # Add data rows with formatted SSP labels
+  for (ssp in ssps) {
+    formatted_ssp <- ssp_mapping[ssp]
+    html_content <- c(html_content, paste0("<div class='row-header'>", formatted_ssp, "</div>"))
+    
+    for (decade in decades) {
+      # Path to the image (updated for v3 folder)
+      img_path <- paste0("individual_maps_", pattern, "_v3/", 
+                        pattern, "_", ssp, "_", decade, ".png")
+      img_full_path <- file.path(output_folder, img_path)
+      
+      # Check if the image exists
+      if (file.exists(img_full_path)) {
+        formatted_decade <- decade_mapping[decade]
+        html_content <- c(html_content, paste0("<div class='grid-cell'><img src='", img_path, 
+                                            "' alt='", formatted_ssp, " - ", formatted_decade, "'></div>"))
+      } else {
+        # Empty cell if image doesn't exist
+        html_content <- c(html_content, "<div class='grid-cell' style='background-color: #f9f9f9;'></div>")
+      }
+    }
+  }
+  
+  # Close grid and add legend
+  html_content <- c(
+    html_content,
+    "</div>",
+    "<div class='legend'>",
+    "<div class='legend-title'> Confidence level(Agreement among ESMs)</div>",
+    "<div class='legend-items'>",
+     "<div class='legend-item'><div class='legend-color' style='background-color: #fcd225;'></div>No analogue (&lt;25%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #c03a83;'></div>Low confidence (≥25% to &lt;50%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #8606a6;'></div>Medium confidence(≥50% to &lt;75%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #0d0887;'></div>High confidence (≥75%)</div>",
+    "</div>",
+    "</div>",
+    "</div>",
+    "</body>",
+    "</html>"
+  )
+  
+  # Write the HTML file
+  writeLines(html_content, html_file)
+  
+  cat("HTML composite view saved to:", html_file, "\n")
+  
+  # Convert HTML to PNG (with v3 suffix)
+  png_file <- file.path(output_folder, paste0("ESM_Agreement_composite_", pattern, "_v3.png"))
+  
+  # Try to convert HTML to PNG using webshot2
+  tryCatch({
+    webshot2::webshot(
+      url = html_file,
+      file = png_file,
+      delay = 2,  # Wait 2 seconds for everything to render
+      zoom = 2    # Higher resolution
+    )
+    cat("Composite map saved as PNG:", png_file, "\n")
+  }, error = function(e) {
+    cat("Error converting HTML to PNG:", e$message, "\n")
+    cat("Please open the HTML file in a browser and save as PNG manually:\n", html_file, "\n")
+  })
+}
+
+```
+
+#next code to be used is 13_MSP_contraints_shipping_EF_Oct25 and then following the 13_MSP_FINAL_Code_function_Constraints_EF_Oct25 where we map the constraints to aquaculture.

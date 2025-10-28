@@ -1,0 +1,481 @@
+---
+title: "reclassification of the projections of days over 17 C "
+date: 1st version "2024-11-26" this version"2025-10-27"
+author: Marina Christofidis 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+```
+
+# suitable and optimal areas (considering that stress is over 17C and historical data showed that most aquacultures that did not have stock loss are under 578 days per decade over 17C and some that had stock loss are over 578 and under 1000/ 1098 days per decade- check at code 8-values historical_data_aqua_sites)
+
+# Optimal areas (stress 17C)
+```{r}
+opthreshold<-578 #pick number of days that are optimal
+```
+
+#1012 # pick number of days of which would be hard to aquaculture
+```{r}
+suithreshold<-1012 #pick number of days that are sub optimal but still possible
+```
+
+# List files
+
+```{r}
+fname17_ssp119<-list.files(here("raw_data/Data17/"), pattern = "ssp119", full.names = T)
+```
+
+
+```{r}
+for(i in 1:length(fname17_ssp119)){
+  r<-read_rds(fname17_ssp119[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp119[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r2<-r
+  r2[r2<=opthreshold]<-1
+  r2[r2>opthreshold]<-0
+  
+  writeRaster(r2, here(paste0("output_data/Optimal", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 119 (17C)
+```{r}
+Optimal17_CanESM5_119<-rast(here("output_data/Optimal_CanESM5_ssp119_r1i1p.tiff"))
+Optimal17_IPSL_CM6A_LR_119<-rast(here("output_data/Optimal_IPSL-CM6A-LR_ssp119_.tiff"))
+Optimal17_MIROC6_119<-rast(here("output_data/Optimal_MIROC6_ssp119_r1i1p1.tiff"))
+Optimal17_MRI_ESM2_0_119<-rast(here("output_data/Optimal_MRI-ESM2-0_ssp119_r1.tiff"))
+
+```
+#ploting the SSP 119 scenario results for all decades
+```{r}
+plot(Optimal17_CanESM5_119)
+plot(Optimal17_IPSL_CM6A_LR_119)
+plot(Optimal17_MIROC6_119)
+plot(Optimal17_MRI_ESM2_0_119)
+```
+#Suitable SSP119
+```{r}
+for(i in 1:length(fname17_ssp119)){
+  r<-read_rds(fname17_ssp119[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp119[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r2s<-r
+   r2s[ r2s<=suithreshold]<-1
+   r2s[ r2s>suithreshold]<-0
+  
+writeRaster( r2s, here(paste0("output_data/Suitable", name2, ".tiff")), overwrite = TRUE)
+
+}
+```
+
+
+#checking what was done for SSP 119 (17C) suitable areas
+```{r}
+Suitable17_CanESM5_119<-rast(here("output_data/Suitable_CanESM5_ssp119_r1i1p.tiff"))
+Suitable17_IPSL_CM6A_LR_119<-rast(here("output_data/Suitable_IPSL-CM6A-LR_ssp119_.tiff"))
+Suitable17_MIROC6_119<-rast(here("output_data/Suitable_MIROC6_ssp119_r1i1p1.tiff"))
+Suitable17_MRI_ESM2_0_119<-rast(here("output_data/Suitable_MRI-ESM2-0_ssp119_r1.tiff"))
+
+```
+#ploting the SSP 119 scenario results for all decades
+```{r}
+plot(Suitable17_CanESM5_119)
+plot(Suitable17_IPSL_CM6A_LR_119)
+plot(Suitable17_MIROC6_119)
+plot(Suitable17_MRI_ESM2_0_119)
+```
+
+#SSP 126
+# List files
+```{r}
+fname17_ssp126<-list.files(here("raw_data/Data17/"), pattern = "ssp126", full.names = T)
+```
+
+
+#optimal for Ssp 126
+```{r}
+for(i in 1:length(fname17_ssp126)){
+  r<-read_rds(fname17_ssp126[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp126[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r3o<-r
+  r3o[r3o<=opthreshold]<-1
+  r3o[r3o>opthreshold]<-0
+  
+  writeRaster(r3o, here(paste0("output_data/Optimal", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#suitable areas for SSP126
+```{r}
+for(i in 1:length(fname17_ssp126)){
+  r<-read_rds(fname17_ssp126[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp126[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r3s<-r
+  r3s[r3s<=suithreshold]<-1
+  r3s[r3s>suithreshold]<-0
+  
+writeRaster(r3s, here(paste0("output_data/Suitable", name2, ".tiff")), overwrite = TRUE)
+
+}
+```
+
+#checking what was done for SSP 226 (17C)
+```{r}
+Optimal17_ACCESS_CM2_ssp126<- rast(here("output_data/Optimal_ACCESS-CM2_ssp126_r1.tiff"))
+Optimal17_ACCESS_ESM1_5_ssp126<- rast(here("output_data/Optimal_ACCESS-ESM1-5_ssp126.tiff"))
+Optimal17_CanESM5_ssp126<- rast(here("output_data/Optimal_CanESM5_ssp126_r1i1p.tiff"))
+Optimal17_CESM2_WACCM_ssp126<- rast(here("output_data/Optimal_CESM2-WACCM_ssp126_r.tiff"))
+Optimal17_CMCC_ESM2_ssp126<- rast(here("output_data/Optimal_CMCC-ESM2_ssp126_r1i.tiff"))
+Optimal17_IPSL_CM6A_LR_ssp126<- rast(here("output_data/Optimal_IPSL-CM6A-LR_ssp126_.tiff"))
+Optimal17_MIROC6_ssp126<- rast(here("output_data/Optimal_MIROC6_ssp126_r1i1p1.tiff"))
+Optimal17_MRI_ESM2_0_ssp126<- rast(here("output_data/Optimal_MRI-ESM2-0_ssp126_r1.tiff"))
+Optimal17_NorESM2_LM_ssp126<- rast(here("output_data/Optimal_NorESM2-LM_ssp126_r1.tiff"))
+```
+
+```{r}
+Suitable17_ACCESS_CM2_ssp126<- rast(here("output_data/Suitable_ACCESS-CM2_ssp126_r1.tiff"))
+Suitable17_ACCESS_ESM1_5_ssp126<- rast(here("output_data/Suitable_ACCESS-ESM1-5_ssp126.tiff"))
+Suitable17_CanESM5_ssp126<- rast(here("output_data/Suitable_CanESM5_ssp126_r1i1p.tiff"))
+Suitable17_CESM2_WACCM_ssp126<- rast(here("output_data/Suitable_CESM2-WACCM_ssp126_r.tiff"))
+Suitable17_CMCC_ESM2_ssp126<- rast(here("output_data/Suitable_CMCC-ESM2_ssp126_r1i.tiff"))
+Suitable17_IPSL_CM6A_LR_ssp126<- rast(here("output_data/Suitable_IPSL-CM6A-LR_ssp126_.tiff"))
+Suitable17_MIROC6_ssp126<- rast(here("output_data/Suitable_MIROC6_ssp126_r1i1p1.tiff"))
+Suitable17_MRI_ESM2_0_ssp126<- rast(here("output_data/Suitable_MRI-ESM2-0_ssp126_r1.tiff"))
+Suitable17_NorESM2_LM_ssp126<- rast(here("output_data/Suitable_NorESM2-LM_ssp126_r1.tiff"))
+```
+
+#ploting optimal areas for the SSP 126 scenario results for all decades
+```{r}
+plot(Optimal17_ACCESS_CM2_ssp126)
+plot(Optimal17_ACCESS_ESM1_5_ssp126)
+plot(Optimal17_CanESM5_ssp126)
+plot(Optimal17_CESM2_WACCM_ssp126)
+plot(Optimal17_CMCC_ESM2_ssp126)
+plot(Optimal17_IPSL_CM6A_LR_ssp126)
+plot(Optimal17_MIROC6_ssp126)
+plot(Optimal17_MRI_ESM2_0_ssp126)
+plot(Optimal17_NorESM2_LM_ssp126)
+```
+
+#plot suitable areas for the SSP 126 scenario results for all decades
+```{r}
+plot(Suitable17_ACCESS_CM2_ssp126)
+plot(Suitable17_ACCESS_ESM1_5_ssp126)
+plot(Suitable17_CanESM5_ssp126)
+plot(Suitable17_CESM2_WACCM_ssp126)
+plot(Suitable17_CMCC_ESM2_ssp126)
+plot(Suitable17_IPSL_CM6A_LR_ssp126)
+plot(Suitable17_MIROC6_ssp126)
+plot(Suitable17_MRI_ESM2_0_ssp126)
+plot(Suitable17_NorESM2_LM_ssp126)
+```
+#SSP 245
+# List files
+```{r}
+fname17_ssp245<-list.files(here("raw_data/Data17/"), pattern = "ssp245", full.names = T)
+```
+
+
+#optimal for Ssp 126
+```{r}
+for(i in 1:length(fname17_ssp245)){
+  r<-read_rds(fname17_ssp245[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp245[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r4o<-r
+  r4o[r4o<=opthreshold]<-1
+  r4o[r4o>opthreshold]<-0
+  
+  writeRaster(r4o, here(paste0("output_data/Optimal", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#suitable areas for SSP245
+```{r}
+for(i in 1:length(fname17_ssp245)){
+  r<-read_rds(fname17_ssp245[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp245[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r4s<-r
+  r4s[r4s<=suithreshold]<-1
+  r4s[r4s>suithreshold]<-0
+  
+writeRaster(r4s, here(paste0("output_data/Suitable", name2, ".tiff")), overwrite = TRUE)
+
+}
+```
+
+#checking what was done for SSP 226 (17C)
+```{r}
+Optimal17_ACCESS_CM2_ssp245<- rast(here("output_data/Optimal_ACCESS-CM2_ssp245_r1.tiff"))
+Optimal17_ACCESS_ESM1_5_ssp245<- rast(here("output_data/Optimal_ACCESS-ESM1-5_ssp245.tiff"))
+Optimal17_CanESM5_ssp245<- rast(here("output_data/Optimal_CanESM5_ssp245_r1i1p.tiff"))
+Optimal17_CESM2_WACCM_ssp245<- rast(here("output_data/Optimal_CESM2-WACCM_ssp245_r.tiff"))
+Optimal17_CMCC_ESM2_ssp245<- rast(here("output_data/Optimal_CMCC-ESM2_ssp245_r1i.tiff"))
+Optimal17_IPSL_CM6A_LR_ssp245<- rast(here("output_data/Optimal_IPSL-CM6A-LR_ssp245_.tiff"))
+Optimal17_MIROC6_ssp245<- rast(here("output_data/Optimal_MIROC6_ssp245_r1i1p1.tiff"))
+Optimal17_MRI_ESM2_0_ssp245<- rast(here("output_data/Optimal_MRI-ESM2-0_ssp245_r1.tiff"))
+Optimal17_NorESM2_LM_ssp245<- rast(here("output_data/Optimal_NorESM2-LM_ssp245_r1.tiff"))
+```
+
+```{r}
+Suitable17_ACCESS_CM2_ssp245<- rast(here("output_data/Suitable_ACCESS-CM2_ssp245_r1.tiff"))
+Suitable17_ACCESS_ESM1_5_ssp245<- rast(here("output_data/Suitable_ACCESS-ESM1-5_ssp245.tiff"))
+Suitable17_CanESM5_ssp245<- rast(here("output_data/Suitable_CanESM5_ssp245_r1i1p.tiff"))
+Suitable17_CESM2_WACCM_ssp245<- rast(here("output_data/Suitable_CESM2-WACCM_ssp245_r.tiff"))
+Suitable17_CMCC_ESM2_ssp245<- rast(here("output_data/Suitable_CMCC-ESM2_ssp245_r1i.tiff"))
+Suitable17_IPSL_CM6A_LR_ssp245<- rast(here("output_data/Suitable_IPSL-CM6A-LR_ssp245_.tiff"))
+Suitable17_MIROC6_ssp245<- rast(here("output_data/Suitable_MIROC6_ssp245_r1i1p1.tiff"))
+Suitable17_MRI_ESM2_0_ssp245<- rast(here("output_data/Suitable_MRI-ESM2-0_ssp245_r1.tiff"))
+Suitable17_NorESM2_LM_ssp245<- rast(here("output_data/Suitable_NorESM2-LM_ssp245_r1.tiff"))
+```
+
+#ploting optimal areas for the SSP 126 scenario results for all decades
+```{r}
+plot(Optimal17_ACCESS_CM2_ssp245)
+plot(Optimal17_ACCESS_ESM1_5_ssp245)
+plot(Optimal17_CanESM5_ssp245)
+plot(Optimal17_CESM2_WACCM_ssp245)
+plot(Optimal17_CMCC_ESM2_ssp245)
+plot(Optimal17_IPSL_CM6A_LR_ssp245)
+plot(Optimal17_MIROC6_ssp245)
+plot(Optimal17_MRI_ESM2_0_ssp245)
+plot(Optimal17_NorESM2_LM_ssp245)
+```
+
+#plot suitable areas for the SSP 126 scenario results for all decades
+```{r}
+plot(Suitable17_ACCESS_CM2_ssp245)
+plot(Suitable17_ACCESS_ESM1_5_ssp245)
+plot(Suitable17_CanESM5_ssp245)
+plot(Suitable17_CESM2_WACCM_ssp245)
+plot(Suitable17_CMCC_ESM2_ssp245)
+plot(Suitable17_IPSL_CM6A_LR_ssp245)
+plot(Suitable17_MIROC6_ssp245)
+plot(Suitable17_MRI_ESM2_0_ssp245)
+plot(Suitable17_NorESM2_LM_ssp245)
+```
+#SSP 370
+# List files
+```{r}
+fname17_ssp370<-list.files(here("raw_data/Data17/"), pattern = "ssp370", full.names = T)
+```
+
+
+#optimal for Ssp 370
+```{r}
+for(i in 1:length(fname17_ssp370)){
+  r<-read_rds(fname17_ssp370[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp370[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r5o<-r
+  r5o[r5o<=opthreshold]<-1
+  r5o[r5o>opthreshold]<-0
+  
+  writeRaster(r5o, here(paste0("output_data/Optimal", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#suitable areas for ssp370
+```{r}
+for(i in 1:length(fname17_ssp370)){
+  r<-read_rds(fname17_ssp370[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp370[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r5s<-r
+  r5s[r5s<=suithreshold]<-1
+  r5s[r5s>suithreshold]<-0
+  
+writeRaster(r5s, here(paste0("output_data/Suitable", name2, ".tiff")), overwrite = TRUE)
+
+}
+```
+
+#checking what was done for ssp370 (17C)
+#optimal areas 
+```{r}
+Optimal17_ACCESS_CM2_ssp370<- rast(here("output_data/Optimal_ACCESS-CM2_ssp370_r1.tiff"))
+Optimal17_ACCESS_ESM1_5_ssp370<- rast(here("output_data/Optimal_ACCESS-ESM1-5_ssp370.tiff"))
+Optimal17_CanESM5_ssp370<- rast(here("output_data/Optimal_CanESM5_ssp370_r1i1p.tiff"))
+Optimal17_CESM2_WACCM_ssp370<- rast(here("output_data/Optimal_CESM2-WACCM_ssp370_r.tiff"))
+Optimal17_CMCC_ESM2_ssp370<- rast(here("output_data/Optimal_CMCC-ESM2_ssp370_r1i.tiff"))
+Optimal17_IPSL_CM6A_LR_ssp370<- rast(here("output_data/Optimal_IPSL-CM6A-LR_ssp370_.tiff"))
+Optimal17_MIROC6_ssp370<- rast(here("output_data/Optimal_MIROC6_ssp370_r1i1p1.tiff"))
+Optimal17_MRI_ESM2_0_ssp370<- rast(here("output_data/Optimal_MRI-ESM2-0_ssp370_r1.tiff"))
+Optimal17_NorESM2_LM_ssp370<- rast(here("output_data/Optimal_NorESM2-LM_ssp370_r1.tiff"))
+```
+#ssp370 suitability but not optimal
+```{r}
+Suitable17_ACCESS_CM2_ssp370<- rast(here("output_data/Suitable_ACCESS-CM2_ssp370_r1.tiff"))
+Suitable17_ACCESS_ESM1_5_ssp370<- rast(here("output_data/Suitable_ACCESS-ESM1-5_ssp370.tiff"))
+Suitable17_CanESM5_ssp370<- rast(here("output_data/Suitable_CanESM5_ssp370_r1i1p.tiff"))
+Suitable17_CESM2_WACCM_ssp370<- rast(here("output_data/Suitable_CESM2-WACCM_ssp370_r.tiff"))
+Suitable17_CMCC_ESM2_ssp370<- rast(here("output_data/Suitable_CMCC-ESM2_ssp370_r1i.tiff"))
+Suitable17_IPSL_CM6A_LR_ssp370<- rast(here("output_data/Suitable_IPSL-CM6A-LR_ssp370_.tiff"))
+Suitable17_MIROC6_ssp370<- rast(here("output_data/Suitable_MIROC6_ssp370_r1i1p1.tiff"))
+Suitable17_MRI_ESM2_0_ssp370<- rast(here("output_data/Suitable_MRI-ESM2-0_ssp370_r1.tiff"))
+Suitable17_NorESM2_LM_ssp370<- rast(here("output_data/Suitable_NorESM2-LM_ssp370_r1.tiff"))
+```
+
+#ploting optimal areas for the ssp370 scenario results for all decades
+```{r}
+plot(Optimal17_ACCESS_CM2_ssp370)
+plot(Optimal17_ACCESS_ESM1_5_ssp370)
+plot(Optimal17_CanESM5_ssp370)
+plot(Optimal17_CESM2_WACCM_ssp370)
+plot(Optimal17_CMCC_ESM2_ssp370)
+plot(Optimal17_IPSL_CM6A_LR_ssp370)
+plot(Optimal17_MIROC6_ssp370)
+plot(Optimal17_MRI_ESM2_0_ssp370)
+plot(Optimal17_NorESM2_LM_ssp370)
+```
+
+#plot suitable areas for the ssp370 scenario results for all decades
+```{r}
+plot(Suitable17_ACCESS_CM2_ssp370)
+plot(Suitable17_ACCESS_ESM1_5_ssp370)
+plot(Suitable17_CanESM5_ssp370)
+plot(Suitable17_CESM2_WACCM_ssp370)
+plot(Suitable17_CMCC_ESM2_ssp370)
+plot(Suitable17_IPSL_CM6A_LR_ssp370)
+plot(Suitable17_MIROC6_ssp370)
+plot(Suitable17_MRI_ESM2_0_ssp370)
+plot(Suitable17_NorESM2_LM_ssp370)
+```
+#SSP 585
+# List files
+```{r}
+fname17_ssp585<-list.files(here("raw_data/Data17/"), pattern = "ssp585", full.names = T)
+```
+
+
+#optimal for Ssp 585
+```{r}
+for(i in 1:length(fname17_ssp585)){
+  r<-read_rds(fname17_ssp585[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp585[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r6o<-r
+  r6o[r6o<=opthreshold]<-1
+  r6o[r6o>opthreshold]<-0
+  
+  writeRaster(r6o, here(paste0("output_data/Optimal", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#suitable areas for ssp585
+```{r}
+for(i in 1:length(fname17_ssp585)){
+  r<-read_rds(fname17_ssp585[[i]]) %>% 
+    unwrap(.)
+  
+  name<-fname17_ssp585[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r6s<-r
+  r6s[r6s<=suithreshold]<-1
+  r6s[r6s>suithreshold]<-0
+  
+writeRaster(r6s, here(paste0("output_data/Suitable", name2, ".tiff")), overwrite = TRUE)
+
+}
+```
+
+#checking what was done for ssp585 (17C)
+#optimal areas 
+```{r}
+Optimal17_ACCESS_CM2_ssp585<- rast(here("output_data/Optimal_ACCESS-CM2_ssp585_r1.tiff"))
+Optimal17_ACCESS_ESM1_5_ssp585<- rast(here("output_data/Optimal_ACCESS-ESM1-5_ssp585.tiff"))
+Optimal17_CanESM5_ssp585<- rast(here("output_data/Optimal_CanESM5_ssp585_r1i1p.tiff"))
+Optimal17_CESM2_WACCM_ssp585<- rast(here("output_data/Optimal_CESM2-WACCM_ssp585_r.tiff"))
+Optimal17_CMCC_ESM2_ssp585<- rast(here("output_data/Optimal_CMCC-ESM2_ssp585_r1i.tiff"))
+Optimal17_IPSL_CM6A_LR_ssp585<- rast(here("output_data/Optimal_IPSL-CM6A-LR_ssp585_.tiff"))
+Optimal17_MIROC6_ssp585<- rast(here("output_data/Optimal_MIROC6_ssp585_r1i1p1.tiff"))
+Optimal17_MRI_ESM2_0_ssp585<- rast(here("output_data/Optimal_MRI-ESM2-0_ssp585_r1.tiff"))
+Optimal17_NorESM2_LM_ssp585<- rast(here("output_data/Optimal_NorESM2-LM_ssp585_r1.tiff"))
+```
+#ssp585 suitable but not optimal
+```{r}
+Suitable17_ACCESS_CM2_ssp585<- rast(here("output_data/Suitable_ACCESS-CM2_ssp585_r1.tiff"))
+Suitable17_ACCESS_ESM1_5_ssp585<- rast(here("output_data/Suitable_ACCESS-ESM1-5_ssp585.tiff"))
+Suitable17_CanESM5_ssp585<- rast(here("output_data/Suitable_CanESM5_ssp585_r1i1p.tiff"))
+Suitable17_CESM2_WACCM_ssp585<- rast(here("output_data/Suitable_CESM2-WACCM_ssp585_r.tiff"))
+Suitable17_CMCC_ESM2_ssp585<- rast(here("output_data/Suitable_CMCC-ESM2_ssp585_r1i.tiff"))
+Suitable17_IPSL_CM6A_LR_ssp585<- rast(here("output_data/Suitable_IPSL-CM6A-LR_ssp585_.tiff"))
+Suitable17_MIROC6_ssp585<- rast(here("output_data/Suitable_MIROC6_ssp585_r1i1p1.tiff"))
+Suitable17_MRI_ESM2_0_ssp585<- rast(here("output_data/Suitable_MRI-ESM2-0_ssp585_r1.tiff"))
+Suitable17_NorESM2_LM_ssp585<- rast(here("output_data/Suitable_NorESM2-LM_ssp585_r1.tiff"))
+```
+
+#ploting optimal areas for the ssp585 scenario results for all decades
+```{r}
+plot(Optimal17_ACCESS_CM2_ssp585)
+plot(Optimal17_ACCESS_ESM1_5_ssp585)
+plot(Optimal17_CanESM5_ssp585)
+plot(Optimal17_CESM2_WACCM_ssp585)
+plot(Optimal17_CMCC_ESM2_ssp585)
+plot(Optimal17_IPSL_CM6A_LR_ssp585)
+plot(Optimal17_MIROC6_ssp585)
+plot(Optimal17_MRI_ESM2_0_ssp585)
+plot(Optimal17_NorESM2_LM_ssp585)
+```
+
+#plot suitable areas for the ssp585 scenario results for all decades
+```{r}
+plot(Suitable17_ACCESS_CM2_ssp585)
+plot(Suitable17_ACCESS_ESM1_5_ssp585)
+plot(Suitable17_CanESM5_ssp585)
+plot(Suitable17_CESM2_WACCM_ssp585)
+plot(Suitable17_CMCC_ESM2_ssp585)
+plot(Suitable17_IPSL_CM6A_LR_ssp585)
+plot(Suitable17_MIROC6_ssp585)
+plot(Suitable17_MRI_ESM2_0_ssp585)
+plot(Suitable17_NorESM2_LM_ssp585)
+```
+
+#Go to code 9_C_Reclass_EF_Oct25

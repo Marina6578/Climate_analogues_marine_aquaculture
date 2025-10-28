@@ -1,0 +1,146 @@
+---
+title: "17_km2_fold_area_available_marine_territory_overtime_EF_Oct25"
+date: 1st version "2025-04-28" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load packages 
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(viridis)
+library(patchwork)
+library(here)
+```
+
+```{r}
+# Set the correct current aquaculture area
+current_aquaculture_area <- 25.88  # km2
+```
+
+
+```{r}
+# upload data to further Calculate the fold change
+df <- read.csv(here("output_data/Climate_MSP_Analysis_2024_Corrected/constraint_impact_analysis/constraint_impact_on_analogues.csv")) %>%
+  mutate(
+    Decade_num = as.numeric(substr(Decade, 1, 4)),
+    Fold_Change = (Climate_Suitable_km2 - Constraint_Area_km2) / current_aquaculture_area
+  )
+
+# Create the visualization
+ggplot(df, aes(x = Decade_num, y = Fold_Change, color = Marine_Zone)) +
+  geom_line(aes(linetype = Pattern), size = 1) +
+  facet_wrap(~SSP, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Potential Expansion of Aquaculture Area",
+    subtitle = "Available area as multiple of current aquaculture extent (25.88 km²)",
+    x = "Decade",
+    y = "Times larger than current area",
+    color = "Marine Zone",
+    linetype = "Pattern"
+  ) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  scale_x_continuous(breaks = seq(2020, 2090, by = 10)) +
+  scale_color_brewer(palette = "Set2")
+
+# Calculate summary statistics
+summary_stats <- df %>%
+  group_by(SSP, Marine_Zone, Pattern) %>%
+  summarize(
+    Max_Fold = max(Fold_Change),
+    Min_Fold = min(Fold_Change),
+    Mean_Fold = mean(Fold_Change),
+    .groups = 'drop'
+  ) %>%
+  arrange(SSP, Marine_Zone, Pattern)
+
+# Print rounded summary statistics
+print(summary_stats %>%
+  mutate(across(where(is.numeric), round, 1)))
+
+# Calculate the range of expansion potential
+range_summary <- df %>%
+  group_by(Marine_Zone) %>%
+  summarize(
+    Min_Expansion = min(Fold_Change),
+    Max_Expansion = max(Fold_Change),
+    .groups = 'drop'
+  ) %>%
+  mutate(across(where(is.numeric), round, 1))
+
+print("Range of potential expansion by marine zone:")
+print(range_summary)
+```
+
+```{r}
+
+# Prepare data and then calculate the fold change
+df <- read.csv(here("output_data/Climate_MSP_Analysis_2024/constraint_impact_analysis/constraint_impact_on_analogues.csv")) %>%
+  mutate(
+    Decade_num = as.numeric(substr(Decade, 1, 4)),
+    Fold_Change = (Climate_Suitable_km2 - Constraint_Area_km2) / current_aquaculture_area
+  )
+
+# Set specific colors from viridis palette
+zone_colors <- c(
+  "Commonwealth Waters" = "#440154FF",  # deep purple from viridis
+  "Coastal waters and territorial seas (state waters)" = "#21908CFF",  # teal
+  "High Seas" = "#FDE725FF"  # yellow
+)
+
+# Commonwealth waters plot
+p1 <- ggplot(df %>% filter(Marine_Zone == "Commonwealth Waters"), 
+       aes(x = Decade_num, y = Fold_Change, color = Marine_Zone)) +
+  geom_line(aes(linetype = Pattern), size = 1) +
+  facet_wrap(~SSP) +
+  scale_color_manual(values = zone_colors) +
+  theme_minimal() +
+  labs(
+    title = "Commonwealth Waters",
+    x = NULL,
+    y = "Times larger than current area"
+  )
+
+# State waters and High seas plot
+p2 <- ggplot(df %>% filter(Marine_Zone != "Commonwealth Waters"), 
+       aes(x = Decade_num, y = Fold_Change, color = Marine_Zone)) +
+  geom_line(aes(linetype = Pattern), size = 1) +
+  facet_wrap(~SSP) +
+  scale_color_manual(values = zone_colors) +
+  theme_minimal() +
+  labs(
+    title = "State Waters and High Seas",
+    x = "Decade",
+    y = "Times larger than current area"
+  )
+
+# Combine plots vertically
+combined_plot <- p1 / p2 +
+  plot_layout(heights = c(1, 1)) +
+  plot_annotation(
+    title = "Potential Expansion of Aquaculture Area",
+    subtitle = "Available area as multiple of current aquaculture extent (25.88 km²)"
+  )
+
+# Save the plot with correct path
+ggsave(
+  filename = here("Figures", "aquaculture_expansion_detailed.png"),
+  plot = combined_plot,
+  width = 12, 
+  height = 10, 
+  dpi = 300
+)
+
+```
+
+# go to code 18_Marine_territories_map_EF_Oct25

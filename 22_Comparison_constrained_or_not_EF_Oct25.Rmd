@@ -1,0 +1,374 @@
+---
+title: "22_Comparison_constrained_or_not_EF_Oct25"
+date: 1st version "2025-08-04" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Marine Climate Analogues Temporal and Constraint Comparison Analysis
+# This script compares climate analogues with and without spatial constraints
+# across marine zones, SSPs, and decade and also suitable and optimal patterns
+```{r}
+
+
+# Load required libraries
+library(here)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(knitr)
+library(kableExtra)
+library(htmltools)
+library(stringr)
+
+# Set up file paths using here package
+input_file_no_constraints <- here("output_data", "ESM_Agreement_plots_Area_CORRECTED", "area_results_marine_zones_CORRECTED.csv")
+input_file_with_constraints <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv")
+output_csv <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "text_summaries", "marine_zones_temporal_constraint_comparison.csv")
+output_html <- here("output_data", "Climate_MSP_Analysis_2024_Corrected", "text_summaries", "marine_zones_temporal_constraint_comparison.html")
+
+# Create output directory if it doesn't exist
+dir.create(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "text_summaries"), recursive = TRUE, showWarnings = FALSE)
+
+# Read the data
+cat("Reading input files...\n")
+data_no_constraints <- read_csv(input_file_no_constraints, show_col_types = FALSE)
+data_with_constraints <- read_csv(input_file_with_constraints, show_col_types = FALSE)
+
+# Clean SSP names for better display
+clean_ssp_names <- function(ssp) {
+  case_when(
+    ssp == "ssp119" ~ "SSP 1-1.9",
+    ssp == "ssp126" ~ "SSP 1-2.6",
+    ssp == "ssp245" ~ "SSP 2-4.5",
+    ssp == "ssp370" ~ "SSP 3-7.0",
+    ssp == "ssp585" ~ "SSP 5-8.5",
+    TRUE ~ ssp
+  )
+}
+
+# Clean decade names for better display
+clean_decade_names <- function(decade) {
+  str_replace(decade, "_", "-")
+}
+
+# Process data for high confidence areas (including both suitable and optimal patterns)
+process_data <- function(data, constraint_type) {
+  data %>%
+    mutate(
+      SSP_clean = clean_ssp_names(SSP),
+      Decade_clean = clean_decade_names(Decade),
+      Constraint_Type = constraint_type
+    ) %>%
+    # Keep both suitable and optimal patterns
+    select(SSP_clean, Decade_clean, Marine_Zone, Pattern, High_Confidence_km2, 
+           Constraint_Type, everything())
+}
+
+# Process both datasets
+data_no_constraints_clean <- process_data(data_no_constraints, "Without Constraints")
+data_with_constraints_clean <- process_data(data_with_constraints, "With Constraints")
+
+# Combine datasets
+combined_data <- bind_rows(data_no_constraints_clean, data_with_constraints_clean)
+
+# Create baseline (2021-2030) reference for comparisons
+baseline_data <- combined_data %>%
+  filter(Decade_clean == "2021-2030") %>%
+  select(SSP_clean, Marine_Zone, Pattern, Constraint_Type, Baseline_High_Confidence = High_Confidence_km2)
+
+# Create comprehensive comparison table
+comparison_table <- combined_data %>%
+  left_join(baseline_data, by = c("SSP_clean", "Marine_Zone", "Pattern", "Constraint_Type")) %>%
+  mutate(
+    # Calculate changes from baseline
+    Change_from_Baseline_km2 = High_Confidence_km2 - Baseline_High_Confidence,
+    Change_from_Baseline_pct = round(((High_Confidence_km2 - Baseline_High_Confidence) / Baseline_High_Confidence) * 100, 1),
+    # Format values for display
+    High_Confidence_formatted = format(round(High_Confidence_km2, 0), big.mark = ","),
+    Baseline_formatted = format(round(Baseline_High_Confidence, 0), big.mark = ","),
+    Change_formatted = format(round(Change_from_Baseline_km2, 0), big.mark = ","),
+    Change_pct_formatted = paste0(ifelse(Change_from_Baseline_pct > 0, "+", ""), Change_from_Baseline_pct, "%")
+  ) %>%
+  arrange(SSP_clean, Marine_Zone, Pattern, Constraint_Type, Decade_clean)
+
+# Create summary table for end-of-century (2091-2100) comparisons
+end_century_summary <- combined_data %>%
+  filter(Decade_clean %in% c("2021-2030", "2091-2100")) %>%
+  select(SSP_clean, Marine_Zone, Pattern, Decade_clean, Constraint_Type, High_Confidence_km2) %>%
+  pivot_wider(names_from = c(Decade_clean, Constraint_Type), 
+              values_from = High_Confidence_km2,
+              names_sep = "_") %>%
+  mutate(
+    # Calculate temporal changes without constraints
+    Temporal_Change_No_Constraints_km2 = `2091-2100_Without Constraints` - `2021-2030_Without Constraints`,
+    Temporal_Change_No_Constraints_pct = round(((`2091-2100_Without Constraints` - `2021-2030_Without Constraints`) / `2021-2030_Without Constraints`) * 100, 1),
+    
+    # Calculate constraint impact at end of century
+    Constraint_Impact_2091_km2 = `2091-2100_With Constraints` - `2091-2100_Without Constraints`,
+    Constraint_Impact_2091_pct = round(((`2091-2100_With Constraints` - `2091-2100_Without Constraints`) / `2091-2100_Without Constraints`) * 100, 1),
+    
+    # Overall change from baseline without constraints to end-of-century with constraints
+    Overall_Change_km2 = `2091-2100_With Constraints` - `2021-2030_Without Constraints`,
+    Overall_Change_pct = round(((`2091-2100_With Constraints` - `2021-2030_Without Constraints`) / `2021-2030_Without Constraints`) * 100, 1),
+    
+    # Format for display
+    across(contains("2021-2030") | contains("2091-2100"), ~format(round(.x, 0), big.mark = ",")),
+    across(contains("Change_km2") | contains("Impact_km2"), ~format(round(.x, 0), big.mark = ",")),
+    across(contains("_pct"), ~paste0(ifelse(.x > 0, "+", ""), .x, "%"))
+  ) %>%
+  arrange(SSP_clean, Marine_Zone, Pattern)
+
+# Write CSV output
+cat("Writing CSV output...\n")
+write_csv(comparison_table, output_csv)
+
+# Create detailed comparison table for specific examples
+detailed_examples <- end_century_summary %>%
+  mutate(
+    Summary_Text = paste0(
+      "In ", SSP_clean, " ", Marine_Zone, " (", Pattern, " pattern) had ", 
+      `2021-2030_Without Constraints`, " km² in 2021-2030 and ended the century with ",
+      `2091-2100_Without Constraints`, " km² (", Temporal_Change_No_Constraints_pct, " change). ",
+      "Adding constraints, the final area available climatically and not constrained by other users and sensitive habitat was ",
+      `2091-2100_With Constraints`, " km² (", Constraint_Impact_2091_pct, " impact from constraints), ",
+      "which is ", abs(as.numeric(str_extract(Overall_Change_pct, "-?\\d+\\.?\\d*"))), "% ",
+      ifelse(as.numeric(str_extract(Overall_Change_pct, "-?\\d+\\.?\\d*")) < 0, "smaller", "larger"),
+      " than the area available in 2021-2030."
+    )
+  )
+
+# Generate HTML report
+cat("Generating HTML report...\n")
+
+# Create summary table for HTML (simplified)
+summary_table_html <- end_century_summary %>%
+  select(SSP_clean, Marine_Zone, Pattern,
+         `2021-2030_Without Constraints`, `2091-2100_Without Constraints`, 
+         Temporal_Change_No_Constraints_pct,
+         `2091-2100_With Constraints`, Constraint_Impact_2091_pct,
+         Overall_Change_pct) %>%
+  kable(col.names = c("SSP", "Marine Zone", "Pattern",
+                     "2021-2030 (km²)", "2091-2100 (km²)", "Temporal Change (%)",
+                     "2091-2100 Constrained (km²)", "Constraint Impact (%)", 
+                     "Overall Change (%)"),
+        format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+               full_width = TRUE) %>%
+  add_header_above(c(" " = 3, "Without Constraints" = 3, "With Constraints" = 2, " " = 1))
+
+# Create detailed table for HTML (simplified)
+detailed_table_html <- comparison_table %>%
+  select(SSP_clean, Marine_Zone, Pattern, Decade_clean, Constraint_Type, 
+         High_Confidence_formatted, Change_formatted, Change_pct_formatted) %>%
+  kable(col.names = c("SSP", "Marine Zone", "Pattern", "Decade", "Constraint Type", 
+                     "High Confidence Area (km²)", "Change from 2021-2030 (km²)", "Change (%)"),
+        format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+               full_width = TRUE, font_size = 12)
+
+# Create narrative examples HTML
+narrative_html <- paste(
+  lapply(1:nrow(detailed_examples), function(i) {
+    paste0('<div class="summary-box"><p>', detailed_examples$Summary_Text[i], '</p></div>')
+  }),
+  collapse = "\n"
+)
+
+# Create HTML content as a string
+html_content_string <- paste0('
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Marine Climate Analogues: Temporal and Constraint Analysis</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f8f9fa; }
+        .container { max-width: 1400px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; }
+        h3 { color: #7f8c8d; }
+        .summary-box { background-color: #ecf0f1; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 5px solid #3498db; }
+        .highlight { background-color: #fff3cd; padding: 2px 5px; border-radius: 3px; }
+        .positive { color: #27ae60; font-weight: bold; }
+        .negative { color: #e74c3c; font-weight: bold; }
+        .neutral { color: #7f8c8d; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border: 1px solid #bdc3c7; }
+        th { background-color: #34495e; color: white; font-weight: bold; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #e8f4fd; }
+        .metric { font-size: 1.1em; font-weight: bold; }
+        .footnote { font-size: 0.9em; color: #7f8c8d; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Marine Climate Analogues: Temporal and Constraint Analysis</h1>
+        
+        <div class="summary-box">
+            <h3>Analysis Overview</h3>
+            <p>This report compares high-confidence climate analogue areas across marine zones, 
+               examining both temporal changes (2021-2030 to 2091-2100) and the impact of 
+               spatial constraints from aquaculture and sensitive habitats. Analysis includes 
+               both <strong>suitable</strong> and <strong>optimal</strong> climate patterns.</p>
+        </div>
+        
+        <h2>Key Findings Summary</h2>
+        ', summary_table_html, '
+        
+        <h2>Detailed Narrative Examples</h2>
+        ', narrative_html, '
+        
+        <h2>Complete Temporal Analysis</h2>
+        ', detailed_table_html, '
+        
+        <div class="footnote">
+            <p><strong>Notes:</strong></p>
+            <ul>
+                <li>Analysis includes both "suitable" and "optimal" climate patterns separately</li>
+                <li>High-confidence areas represent the most reliable climate analogue projections</li>
+                <li>Temporal changes compare each decade to the 2021-2030 baseline</li>
+                <li>Constraint impacts show the reduction in available area due to spatial constraints</li>
+                <li>Overall changes combine both temporal climate shifts and spatial constraints</li>
+                <li>Negative values indicate reductions in suitable area; positive values indicate increases</li>
+            </ul>
+        </div>
+        
+        <p>Report generated on: ', Sys.Date(), '</p>
+    </div>
+</body>
+</html>')
+
+# Write HTML file
+cat("Writing HTML output...\n")
+writeLines(html_content_string, output_html)
+
+# Print summary statistics
+cat("\n=== ANALYSIS COMPLETE ===\n")
+cat("Files generated:\n")
+cat("- CSV:", output_csv, "\n")
+cat("- HTML:", output_html, "\n")
+
+cat("\nSample narrative examples:\n")
+for(i in 1:min(3, nrow(detailed_examples))) {
+  cat("\n", i, ". ", detailed_examples$Summary_Text[i], "\n")
+}
+
+```
+
+#last piece 
+# Marine Zone Data Aggregation Script
+# This script aggregates marine zone data by SSP, Decade, and Pattern
+# and creates totals for each combination
+#load libraries
+```{r}
+library(dplyr)
+library(readr)
+library(here)
+```
+
+#load data
+```{r}
+# Read your CSV file (update the path as needed)
+data <- read_csv(here("output_data/ESM_Agreement_Plots_Area_CORRECTED/area_results_marine_zones_CORRECTED.csv"))
+```
+
+
+```{r}
+# Function to create aggregated table
+create_aggregated_table <- function(data) {
+  
+  # Create individual zone rows (these are already in your data)
+  individual_zones <- data %>%
+    select(SSP, Decade, Pattern, Marine_Zone, 
+           No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, High_Confidence_km2) %>%
+    arrange(SSP, Decade, Pattern, Marine_Zone)
+  
+  # Create total rows by summing across marine zones for each SSP/Decade/Pattern combination
+  total_rows <- data %>%
+    group_by(SSP, Decade, Pattern) %>%
+    summarise(
+      Marine_Zone = "Total",
+      No_Analog_km2 = sum(No_Analog_km2, na.rm = TRUE),
+      Low_Confidence_km2 = sum(Low_Confidence_km2, na.rm = TRUE),
+      Medium_Confidence_km2 = sum(Medium_Confidence_km2, na.rm = TRUE),
+      High_Confidence_km2 = sum(High_Confidence_km2, na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  # Combine individual zones and totals
+  aggregated_data <- bind_rows(individual_zones, total_rows) %>%
+    arrange(SSP, Decade, Pattern, 
+            factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas", "Total")))
+  
+  return(aggregated_data)
+}
+
+# Run the aggregation
+aggregated_results <- create_aggregated_table(data)
+
+# View the results
+print("Aggregated table created successfully!")
+print(paste("Total rows:", nrow(aggregated_results)))
+
+# Show example for ssp119, 2021_2030, suitable
+example_data <- aggregated_results %>%
+  filter(SSP == "ssp119", Decade == "2021_2030", Pattern == "suitable")
+
+print("\nExample for ssp119, 2021_2030, suitable:")
+print(example_data)
+
+# Show first few rows of the complete table
+print("\nFirst 12 rows of aggregated table:")
+print(head(aggregated_results, 12))
+
+# Load here package for path management
+library(here)
+
+# Define output directory
+output_dir <- here("output_data", "ESM_Agreement_Plots_Area_CORRECTED")
+
+# Create directory if it doesn't exist
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+  print(paste("Created directory:", output_dir))
+}
+
+# Save the aggregated table to CSV
+csv_path <- file.path(output_dir, "aggregated_marine_zones_by_ssp_pattern.csv")
+write_csv(aggregated_results, csv_path)
+print(paste("Aggregated data saved to:", csv_path))
+
+# Optional: Create an HTML table for better viewing
+library(knitr)
+library(kableExtra)
+
+html_table <- aggregated_results %>%
+  kable(format = "html", 
+        caption = "Marine Zone Areas Aggregated by SSP, Decade, and Pattern",
+        digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  row_spec(which(aggregated_results$Marine_Zone == "Total"), bold = TRUE, background = "#f0f0f0")
+
+# Save HTML table
+html_path <- file.path(output_dir, "aggregated_marine_zones_table.html")
+writeLines(as.character(html_table), html_path)
+print(paste("HTML table saved to:", html_path))
+
+# Show summary statistics
+print("\nSummary of the aggregated data:")
+print("Unique SSPs:")
+print(unique(aggregated_results$SSP))
+print("Unique Decades:")
+print(unique(aggregated_results$Decade))
+print("Unique Patterns:")
+print(unique(aggregated_results$Pattern))
+print("Marine Zones (including Total):")
+print(unique(aggregated_results$Marine_Zone))
+```
+
+# you are done!!! ;) now its time to write 

@@ -1,0 +1,2119 @@
+---
+title: "18_Marine territories Map with inset"
+
+date: 1st version "2025-05-16" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+#making the map
+```{r}
+library(sf)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(viridis)
+library(tmap)
+
+```
+
+
+```{r}
+# 1.  Create bbox in Albers
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_as_sf() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+#2. Load and process all required data
+
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# 3. Crop all layers to bbox
+
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+
+
+
+state_waters<-st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+
+# 4. Create High Seas
+all_managed_waters_and_land <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "terrestrial_areas")
+)
+
+high_seas <- st_difference(bbox_albers, st_union(all_managed_waters_and_land))
+```
+
+```{r}
+# 6. Create the map
+territories_map_viridis <- ggplot() +
+  # Add High Seas
+  geom_sf(data = high_seas, 
+          aes(fill = "High Seas"),
+          color = NA) +
+  # Add Commonwealth waters
+  geom_sf(data = commonwealth_crop, 
+          aes(fill = "Commonwealth Waters"),
+          color = NA) +
+  # Add State waters
+  geom_sf(data = state_waters, 
+          aes(fill = "State Waters"),
+          color = NA) +
+  # Add all terrestrial areas
+  geom_sf(data = terrestrial_areas_crop, 
+          aes(fill = "terrestrial_areas"),
+          color = "black") +
+  
+  # Use viridis palette
+  scale_fill_viridis_d(
+    name = "Territories",
+    option = "mako",
+    begin = 0.2,
+    end = 0.9,
+    direction = -1
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text = element_text(size = 8),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    panel.grid.major = element_line(color = "gray80"),
+    panel.grid.minor = element_line(color = "gray90")
+  ) +
+  labs(
+    title = "Australian Marine Territories Around Tasmania",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  coord_sf(
+    crs = 3577,
+    xlim = st_bbox(bbox_albers)[c(1,3)],
+    ylim = st_bbox(bbox_albers)[c(2,4)]
+  )
+
+# Save the plot
+ggsave(here("Figures", "Australian_territories_Tasmania_viridis.png"), 
+       territories_map_viridis, 
+       width = 10, 
+       height = 8, 
+       dpi = 300)
+
+```
+
+```{r}
+plot(territories_map_viridis)
+```
+
+
+
+
+#BEST MAP
+```{r}
+finfish_farms<-st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))
+```
+
+
+#best map no grids
+```{r}
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+
+# Create the map
+territories_map <- ggplot() +
+  # High Seas (base layer)
+  geom_sf(data = high_seas,
+          aes(color = "High Seas"),
+          fill = "lightblue",
+          alpha = 0.6) +
+  
+  # Land areas
+  geom_sf(data = terrestrial_areas_crop, 
+          fill = "grey40",
+          color = "black") +
+  
+  # Commonwealth Waters boundary
+  geom_sf(data = commonwealth_crop,
+          aes(color = "Commonwealth Waters"),
+          fill = NA,
+          size = 1) +
+  
+  # State Waters boundary
+  geom_sf(data = state_waters,
+          aes(color = "State Waters"),
+          size = 1) +
+  
+  # Finfish farms
+  geom_sf(data = finfish_farms,
+          aes(color = "Finfish Farms"),
+          size = 2,
+          shape = 21,
+          fill = "salmon") +
+  
+  scale_color_manual(
+    name = "Maritime Zones and Sites",
+    values = c(
+      "High Seas" = "lightblue",
+      "Commonwealth Waters" = mako(5)[2],
+      "State Waters" = mako(5)[4],
+      "Finfish Farms" = "salmon"
+    )
+  ) +
+  
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text = element_text(size = 8),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    panel.grid = element_blank()  # Removes all grid lines
+  ) +
+  labs(
+    title = "Maritime Boundaries and Finfish Farms Around Tasmania",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  coord_sf(
+    xlim = st_bbox(bbox_albers)[c(1,3)],
+    ylim = st_bbox(bbox_albers)[c(2,4)]
+  ) +
+  guides(
+    color = guide_legend(order = 2),
+    fill = guide_legend(order = 1)
+  )
+
+# Create Figures directory if it doesn't exist
+if (!dir.exists(here("Figures"))) {
+  dir.create(here("Figures"))
+}
+
+# Save the plot with new name
+ggsave(here("Figures", "Tasmania_Maritime_Boundaries_No_Grid.png"), 
+       territories_map, 
+       width = 10, 
+       height = 8, 
+       dpi = 300,
+       bg = "white")
+
+plot(territories_map)
+```
+#size of marine areas
+```{r}
+
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+
+# Function to calculate area in km² for any spatial object
+calculate_area_km2 <- function(spatial_obj, obj_name = "Unknown") {
+  
+  # Check if object exists and is spatial
+  if (!inherits(spatial_obj, "sf")) {
+    stop(paste("Object", obj_name, "is not an sf object"))
+  }
+  
+  # Get the current CRS
+  current_crs <- st_crs(spatial_obj)
+  cat("CRS for", obj_name, ":", current_crs$input, "\n")
+  
+  # Since data is already in Australian Albers (equal-area projection),
+  # we can calculate areas directly without transformation
+  
+  # Calculate area in m² and convert to km²
+  areas_m2 <- st_area(spatial_obj)
+  areas_km2 <- as.numeric(areas_m2) / 1000000  # Convert m² to km²
+  
+  # Add area column to the spatial object
+  spatial_obj$area_km2 <- areas_km2
+  
+  # Create summary statistics
+  total_area <- sum(areas_km2, na.rm = TRUE)
+  n_features <- nrow(spatial_obj)
+  
+  # Print summary
+  cat("\n=== AREA SUMMARY FOR", toupper(obj_name), "===\n")
+  cat("Number of features:", n_features, "\n")
+  cat("Total area:", format(total_area, big.mark = ",", digits = 2), "km²\n")
+  cat("Average area per feature:", format(mean(areas_km2, na.rm = TRUE), big.mark = ",", digits = 2), "km²\n")
+  cat("Largest feature:", format(max(areas_km2, na.rm = TRUE), big.mark = ",", digits = 2), "km²\n")
+  cat("Smallest feature:", format(min(areas_km2, na.rm = TRUE), big.mark = ",", digits = 2), "km²\n")
+  cat("==========================================\n\n")
+  
+  return(spatial_obj)
+}
+
+# List of your shapefile objects
+shapefile_names <- c("bbox_albers", "terrestrial_areas_crop", "commonwealth_crop", 
+                     "state_waters", "high_seas")
+
+# Initialize results list
+area_results <- list()
+
+# Calculate areas for each shapefile
+for (name in shapefile_names) {
+  
+  # Check if object exists in environment
+  if (exists(name)) {
+    
+    cat("Processing:", name, "\n")
+    
+    # Get the spatial object
+    spatial_obj <- get(name)
+    
+    # Calculate areas
+    result <- calculate_area_km2(spatial_obj, name)
+    
+    # Store results
+    area_results[[name]] <- result
+    
+  } else {
+    cat("Warning: Object", name, "not found in environment\n")
+  }
+}
+
+# Create a summary table of total areas
+summary_table <- data.frame(
+  Shapefile = character(),
+  Total_Area_km2 = numeric(),
+  Number_of_Features = integer(),
+  stringsAsFactors = FALSE
+)
+
+for (name in names(area_results)) {
+  if (!is.null(area_results[[name]])) {
+    total_area <- sum(area_results[[name]]$area_km2, na.rm = TRUE)
+    n_features <- nrow(area_results[[name]])
+    
+    summary_table <- rbind(summary_table, 
+                          data.frame(Shapefile = name,
+                                   Total_Area_km2 = total_area,
+                                   Number_of_Features = n_features))
+  }
+}
+
+# Display final summary table
+cat("=== OVERALL SUMMARY ===\n")
+print(summary_table)
+
+# Optional: Save individual results with area calculations using here package
+# Create output directory if it doesn't exist
+output_dir <- here("output_data")
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+  cat("Created directory:", output_dir, "\n")
+}
+
+# save the results
+ for (name in names(area_results)) {
+   if (!is.null(area_results[[name]])) {
+#     Ensure output directory exists before each write
+     if (!dir.exists(output_dir)) {
+       dir.create(output_dir, recursive = TRUE)
+     }
+   
+  output_name <- here("output_data", paste0("territory_areas_", name, ".shp"))
+#     
+#     # Try to write with error handling
+#     tryCatch({
+#       st_write(area_results[[name]], output_name, delete_dsn = TRUE, quiet = TRUE)
+#       cat("Successfully saved:", output_name, "\n")
+#     }, error = function(e) {
+#       cat("Error saving", name, ":", e$message, "\n")
+#       cat("Attempting alternative save method...\n")
+#       
+#       # Alternative: try without delete_dsn
+#       tryCatch({
+#         if (file.exists(output_name)) file.remove(output_name)
+#         st_write(area_results[[name]], output_name, quiet = TRUE)
+#         cat("Successfully saved with alternative method:", output_name, "\n")
+#       }, error = function(e2) {
+#         cat("Failed to save", name, "with both methods\n")
+#       })
+#     })
+#   }
+# }
+
+# Function to get detailed area information for a specific shapefile
+get_detailed_areas <- function(shapefile_name) {
+  if (shapefile_name %in% names(area_results)) {
+    obj <- area_results[[shapefile_name]]
+    if (!is.null(obj) && "area_km2" %in% names(obj)) {
+      
+      # Create detailed summary
+      areas_df <- data.frame(
+        Feature_ID = 1:nrow(obj),
+        Area_km2 = obj$area_km2,
+        stringsAsFactors = FALSE
+      )
+      
+      # Add any existing ID columns if available
+      if ("FID" %in% names(obj)) areas_df$FID <- obj$FID
+      if ("ID" %in% names(obj)) areas_df$ID <- obj$ID
+      if ("NAME" %in% names(obj)) areas_df$Name <- obj$NAME
+      
+      return(areas_df)
+    }
+  }
+  return(NULL)
+}
+
+# Example usage for detailed areas:
+# detailed_areas <- get_detailed_areas("terrestrial_areas_crop")
+# print(detailed_areas)
+```
+
+
+```{r}
+qtm(terrestrial_areas_crop)
+```
+```{r}
+qtm(state_waters)
+```
+```{r}
+ # Land areas
+  st_shape(terrestrial_areas_crop) 
+    tm_polygons (col"black") +
+  tm_shape(commonwealth_crop)+
+         tm_polygons(col = "blue", alpha=0.5)+
+  tm_shape( state_waters)+
+       tm_polygons(col = "green", alpha=0.2)+
+    tm_shape(high_seas)+
+      tm_polygons(col="lightblue")
+  
+```
+#high seas map
+```{r}
+  high_seas_map<- tm_shape(high_seas)+
+      tm_polygons(col="#3B528B")+
+tm_shape(terrestrial_areas_crop) +
+    tm_polygons(col="darkgrey")
+
+  ggsave(here("Figures", "High_seas_map.png"), 
+       high_seas_map, 
+       width = 10, 
+       height = 8, 
+       dpi = 300,
+       bg = "white")
+```
+```{r}
+# High seas map
+high_seas_map <- tm_shape(high_seas) +
+  tm_polygons(col= "#A6DBA0", alpha=0.8) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(high_seas_map, 
+          filename = here("Figures", "High_seas_map.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+
+#commonwealth map
+```{r}
+# Commonwealth map
+commonwealth_map <- tm_shape(commonwealth_crop) +
+  tm_polygons(col = "#21908C", alpha = 0.5) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(commonwealth_map, 
+          filename = here("Figures", "commonwealth_map.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+   
+```
+
+#state waters map
+```{r}
+# State waters map
+state_waters_map <- tm_shape(state_waters) +
+  tm_polygons(col = "#3B528B", alpha=0.7) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(state_waters_map, 
+          filename = here("Figures", "state_waters_map.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+
+```{r}
+high_seas_map
+state_waters_map
+commonwealth_map
+```
+
+
+```{r}
+marine_zones_map<- 
+  tm_shape(commonwealth_crop)+
+         tm_polygons(col = "#21908C", alpha=0.5)+
+  tm_shape( state_waters)+
+       tm_polygons(col = "#3B528B", alpha=0.7)+
+    tm_shape(high_seas)+
+      tm_polygons(col= "#A6DBA0", alpha=0.8)+
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+  
+    tmap_save(marine_zones_map, 
+          filename = here("Figures", "marine_zones_map.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+#marine_zones_map_lines
+```{r}
+marine_zones_map_lines<- 
+  tm_shape(commonwealth_crop)+
+         tm_borders(col = "#21908C", alpha=0.5)+
+  tm_shape( state_waters)+
+       tm_borders(col = "#3B528B", alpha=0.7)+
+    tm_shape(high_seas)+
+      tm_borders(col= "#A6DBA0", alpha=0.8)+
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+  
+    tmap_save(marine_zones_map_lines, 
+          filename = here("Figures", "marine_zones_map_lines.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+# High seas map line
+```{r}
+# High seas map line
+high_seas_map_line<- tm_shape(high_seas) +
+  tm_borders(col= "#A6DBA0", alpha=0.8) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(high_seas_map_line, 
+          filename = here("Figures", "High_seas_map_line.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+
+#commonwealth map line
+```{r}
+# Commonwealth map
+commonwealth_map_line <- tm_shape(commonwealth_crop) +
+  tm_borders(col = "#21908C", alpha = 0.5) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(commonwealth_map_line, 
+          filename = here("Figures", "commonwealth_map_line.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+   
+```
+
+#state waters map line
+```{r}
+# State waters map
+state_waters_map_line <- tm_shape(state_waters) +
+  tm_borders(col = "#3B528B", alpha=0.7) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "darkgrey")
+
+tmap_save(state_waters_map_line, 
+          filename = here("Figures", "state_waters_map_line.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+```
+
+
+
+
+```{r}
+#view your map
+tmap_options(check.and.fix = TRUE)
+
+marine_zones_map_simple <- 
+  tm_shape(commonwealth_crop) + tm_polygons(col = "#21908C", alpha = 0.5) +
+  tm_shape(state_waters) + tm_polygons(col = "#3B528B", alpha = 0.7) +
+  tm_shape(high_seas) + tm_polygons(col = "#A6DBA0", alpha = 0.8) +
+  tm_shape(terrestrial_areas_crop) + tm_polygons(col = "darkgrey")
+
+# Switch to interactive mode and click where you want labels
+#tmap_mode("view")
+marine_zones_map_simple
+
+tmap_mode("plot")
+
+```
+
+#best map with viridis
+#best map no grids
+```{r}
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+```
+
+
+
+```{r}
+tmap_options(check.and.fix = TRUE)
+
+# Create the map
+territories_map_aqua_viridis <-    tm_shape(high_seas) +
+    tm_polygons(col = "#A6DBA0", alpha = 0.6) +
+    tm_shape(terrestrial_areas_crop) +
+    tm_polygons(col = "grey40", alpha = 0.6) +
+    tm_shape(commonwealth_crop) +
+    tm_polygons(col = "#21908C", alpha = 0.6) +
+    tm_shape(state_waters) +
+    tm_polygons(col = "#3B528B", alpha = 0.6) +
+     tm_shape(finfish_farms) +
+    tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2)+ 
+
+# Save the plot
+tmap_save(territories_map_aqua_viridis, 
+          filename = here("Figures", "Tasmania_Maritime_Boundaries_aqua_viridis.png"),
+          width = 10, 
+          height = 8, 
+          dpi = 300)
+
+print(territories_map_aqua_viridis)
+```
+
+#map with legend_viridis more transparent 
+```{r}
+tmap_options(check.and.fix = TRUE)
+
+# Create the map with labels for legend
+territories_map_aqua_viridis_alpha_legend <- tm_shape(high_seas) +
+    tm_polygons(col = "#A6DBA0", alpha = 0.2, title = "High Seas") +
+    tm_shape(terrestrial_areas_crop) +
+    tm_polygons(col = "grey40", alpha = 0.6, title = "Terrestrial Areas") +
+    tm_shape(commonwealth_crop) +
+    tm_polygons(col = "#21908C", alpha = 0.2, title = "Commonwealth Waters") +
+    tm_shape(state_waters) +
+    tm_polygons(col = "#3B528B", alpha = 0.2, title = "State Waters") +
+    tm_shape(finfish_farms) +
+    tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2, title = "Finfish Farms") +
+  tm_add_legend(type = "fill",
+                  labels = c("High Seas", "Terrestrial Areas", "Commonwealth Waters", 
+                            "State Waters", "Finfish Farms"),
+                  col = c("#E8F2E6", "#999999", "#D4E7E5", "#D0D4E0", "#FA8072"),
+                  title = "Maritime Boundaries") +
+    tm_layout(legend.outside = TRUE,
+              legend.outside.position = "bottom",
+              legend.outside.size = 0.2,
+              legend.title.size = 1.2,
+              legend.text.size = 0.8)
+
+# Save the plot
+tmap_save(territories_map_aqua_viridis_alpha_legend, 
+          filename = here("Figures", "Tasmania_Maritime_Boundaries_aqua_viridis_alpha_legend.png"),
+          width = 12,  # Increased width to accommodate legend
+          height = 8, 
+          dpi = 300)
+
+print(territories_map_aqua_viridis_legend)
+```
+
+
+#INSET MAP
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(tmap)
+library(grid)
+library(png)
+
+# Load your spatial data
+# (update these if you've renamed your objects)
+# Assume you already created the cropped versions for Tasmania
+# high_seas_full, commonwealth_full, state_waters_full, terrestrial_areas_full
+# high_seas_crop, commonwealth_crop, state_waters_crop, terrestrial_areas_crop
+# finfish_farms
+# ─────────────────────────────────────────────
+# 1. Load and transform data
+# ─────────────────────────────────────────────
+
+# Load shapefiles and transform to EPSG:3577
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+australia <- st_read("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")
+marine_regions <- st_read("raw_data/Commonwealth_Marine_Regions.shp")
+# ─────────────────────────────────────────────
+# 2. Define Tasmania bbox and crop for inset
+# ─────────────────────────────────────────────
+
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+# Crop for inset
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+
+state_waters_crop <- st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+all_managed_crop <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_crop, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_crop <- st_difference(bbox_albers, st_union(all_managed_crop))
+
+# ─────────────────────────────────────────────
+# 3. Prepare full Australia data for main map
+# ─────────────────────────────────────────────
+
+terrestrial_areas_full <- terrestrial_areas
+coastal_waters_full <- coastal_waters
+commonwealth_full <- commonwealth_waters
+
+state_waters_full <- st_difference(coastal_waters_full, st_union(terrestrial_areas_full))
+
+all_managed_full <- bind_rows(
+  st_set_geometry(commonwealth_full, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_full, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_full, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_full <- st_difference(st_as_sfc(st_bbox(terrestrial_areas_full)), st_union(all_managed_full))
+
+# 1. Create a bounding box around Tasmania
+tas_bbox <- st_bbox(terrestrial_areas_crop) %>%
+  st_as_sfc() %>%
+  st_sf()
+
+# 2. Add bounding box to main map using colorblind-friendly color
+highlight_color <- "#FDE725FF"  # bright yellow-green from viridis
+
+
+# === 1. MAIN MAP OF AUSTRALIA ===
+# 3. Updated MAIN MAP with Tasmania highlight
+main_map <- tm_shape(high_seas_full) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.6, title = "High Seas") +
+  tm_shape(terrestrial_areas_full) +
+  tm_polygons(col = "grey40", alpha = 0.6, title = "Land") +
+  tm_shape(commonwealth_full) +
+  tm_polygons(col = "#21908C", alpha = 0.6, title = "Commonwealth Waters") +
+  tm_shape(state_waters_full) +
+  tm_polygons(col = "#3B528B", alpha = 0.6, title = "State Waters") +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2, title = "Finfish Farms") +
+  tm_shape(tas_bbox) +  # the new bounding box layer
+  tm_borders(col = highlight_color, lwd = 1, lty = "solid") +  # visible frame
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "bottom",
+            legend.outside.size = 0.2,
+            legend.title.size = 1.2,
+            legend.text.size = 0.8)
+
+
+# === 2. INSET MAP OF TASMANIA ===
+inset_map <- tm_shape(high_seas_crop) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.6) +
+  tm_shape(commonwealth_crop) +
+  tm_polygons(col = "#21908C", alpha = 0.6) +
+  tm_shape(state_waters_crop) +
+  tm_polygons(col = "#3B528B", alpha = 0.6) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "grey40", alpha = 0.6) +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2) +
+  tm_layout(frame = TRUE, 
+            bg.color = "white", 
+            legend.show = FALSE, 
+            title = "Tasmania", 
+            title.size = 1)
+
+# === 3. EXPORT BOTH MAPS AS IMAGES ===
+# Save as temporary images
+main_file <- here("Figures", "Australia_map_temp.png")
+inset_file <- here("Figures", "Tasmania_inset_temp.png")
+
+# Create Figures folder if it doesn't exist
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save maps to PNG
+tmap_save(main_map, filename = main_file, width = 12, height = 8, dpi = 300)
+tmap_save(inset_map, filename = inset_file, width = 4, height = 3, dpi = 300)
+
+# === 4. COMBINE WITH GRID ===
+# Read the PNGs
+main_img <- readPNG(main_file)
+inset_img <- readPNG(inset_file)
+
+# Plot in RStudio or export
+grid.newpage()
+grid.raster(main_img)
+vp <- viewport(x = 0.8, y = 0.25, width = 0.35, height = 0.35, just = c("left", "bottom"))
+pushViewport(vp)
+grid.raster(inset_img)
+popViewport()
+
+# === 5. OPTIONAL: EXPORT FINAL COMPOSITE MAP ===
+# Save the composite map to file
+png(filename = here("Figures", "Australia_with_Tasmania_inset.png"),
+    width = 12, height = 8, units = "in", res = 300)
+grid.newpage()
+grid.raster(main_img)
+pushViewport(viewport(x = 0.8, y = 0.25, width = 0.35, height = 0.35, just = c("left", "bottom")))
+grid.raster(inset_img)
+popViewport()
+dev.off()
+```
+
+
+#IMPROVED INSET MAP
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(tmap)
+library(grid)
+library(png)
+
+# ─────────────────────────────────────────────
+# 1. Load and transform data
+# ─────────────────────────────────────────────
+
+# Load shapefiles and transform to EPSG:3577
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# ─────────────────────────────────────────────
+# 2. Create tighter bounding box for main map to reduce whitespace
+# ─────────────────────────────────────────────
+
+# Create a tighter bounding box around Australia + reasonable marine area
+australia_bbox <- st_bbox(terrestrial_areas)
+# Expand by reasonable margins (in meters for EPSG:3577)
+expanded_bbox <- st_bbox(c(
+  xmin = australia_bbox["xmin"] - 50000,  # 50km west
+  xmax = australia_bbox["xmax"] + 200000,  # 200km east  
+  ymin = australia_bbox["ymin"] - 800000,  # 800km south
+  ymax = australia_bbox["ymax"] + 200000   # 200km north
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(3577)
+
+# ─────────────────────────────────────────────
+# 3. Define Tasmania bbox and crop for inset
+# ─────────────────────────────────────────────
+
+# Tasmania bounding box in WGS84, then transform
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+# Crop data for inset
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+
+state_waters_crop <- st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+all_managed_crop <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_crop, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_crop <- st_difference(bbox_albers, st_union(all_managed_crop))
+
+# ─────────────────────────────────────────────
+# 4. Prepare cropped Australia data for main map (to reduce whitespace)
+# ─────────────────────────────────────────────
+
+terrestrial_areas_full <- st_intersection(terrestrial_areas, expanded_bbox)
+coastal_waters_full <- st_intersection(coastal_waters, expanded_bbox)
+commonwealth_full <- st_intersection(commonwealth_waters, expanded_bbox)
+
+state_waters_full <- st_difference(coastal_waters_full, st_union(terrestrial_areas_full))
+
+all_managed_full <- bind_rows(
+  st_set_geometry(commonwealth_full, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_full, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_full, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_full <- st_difference(expanded_bbox, st_union(all_managed_full))
+
+# Create Tasmania highlight box for main map
+tas_bbox <- bbox_albers %>%
+  st_sf()
+
+highlight_color <- "#26619C"  # bright yellow-green
+
+# ─────────────────────────────────────────────
+# 5. Create maps with improved layout
+# ─────────────────────────────────────────────
+
+# MAIN MAP with tighter bounds
+main_map <- tm_shape(high_seas_full) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.2, title = "High Seas") +
+  tm_shape(terrestrial_areas_full) +
+  tm_polygons(col = "grey40", alpha = 0.6, title = "Land") +
+  tm_shape(commonwealth_full) +
+  tm_polygons(col = "#21908C", alpha = 0.2, title = "Commonwealth Waters") +
+  tm_shape(state_waters_full) +
+  tm_polygons(col = "#3B528B", alpha = 0.2, title = "State Waters") +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2, title = "Finfish Farms") +
+  tm_shape(tas_bbox) +
+  tm_borders(col = highlight_color, lwd = 1, lty = "solid") +
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "bottom",
+            legend.outside.size = 0.15,
+            legend.title.size = 1.0,
+            legend.text.size = 0.7,
+            frame = FALSE)
+
+# INSET MAP with proper frame
+inset_map <- tm_shape(high_seas_crop) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.2) +
+  tm_shape(commonwealth_crop) +
+  tm_polygons(col = "#21908C", alpha = 0.2) +
+  tm_shape(state_waters_crop) +
+  tm_polygons(col = "#3B528B", alpha = 0.2) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "grey40", alpha = 0.6) +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2) +
+  tm_layout(frame = TRUE, 
+            frame.lwd = 2,
+            bg.color = "white", 
+            legend.show = FALSE, 
+            title = "Tasmania", 
+            title.size = 1.2,
+            title.position = c("center", "top"))
+
+# ─────────────────────────────────────────────
+# 6. Export maps and create composite with better positioning
+# ─────────────────────────────────────────────
+
+# Create output directory
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save as temporary images
+main_file <- here("Figures", "Australia_map_temp_improved.png")
+inset_file <- here("Figures", "Tasmania_inset_temp_improved.png")
+
+# Save maps to PNG with better dimensions
+tmap_save(main_map, filename = main_file, width = 14, height = 9, dpi = 300)
+tmap_save(inset_map, filename = inset_file, width = 5, height = 4, dpi = 300)
+
+# Read the PNGs
+main_img <- readPNG(main_file)
+inset_img <- readPNG(inset_file)
+
+# ─────────────────────────────────────────────
+# 7. Create composite with better inset positioning
+# ─────────────────────────────────────────────
+
+# Save the improved composite map
+png(filename = here("Figures", "Australia_with_Tasmania_inset_improved.png"),
+    width = 14, height = 9, units = "in", res = 300)
+
+# Plot main map
+grid.newpage()
+grid.raster(main_img)
+
+# Position inset in bottom-left area (away from Tasmania location on main map)
+# Using more conservative positioning to ensure it stays within bounds
+pushViewport(viewport(x = 0.15, y = 0.15, width = 0.3, height = 0.3, 
+                     just = c("center", "center")))
+grid.raster(inset_img)
+grid.rect(gp = gpar(col = highlight_color, fill = NA, lwd = 3))  # Add border
+popViewport()
+
+dev.off()
+
+# Also display in RStudio
+grid.newpage()
+grid.raster(main_img)
+pushViewport(viewport(x = 0.15, y = 0.15, width = 0.3, height = 0.3, 
+                     just = c("center", "center")))
+grid.raster(inset_img)
+grid.rect(gp = gpar(col = highlight_color, fill = NA, lwd = 3))
+popViewport()
+
+# Print completion message
+cat("Improved map saved as: Australia_with_Tasmania_inset_improved.png\n")
+
+```
+#INSET MAP New try
+
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(tmap)
+library(grid)
+library(png)
+
+# ─────────────────────────────────────────────
+# 1. Load and transform data
+# ─────────────────────────────────────────────
+
+# Load shapefiles and transform to EPSG:3577
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577") %>%
+  st_make_valid()
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# ─────────────────────────────────────────────
+# 2. Create tighter bounding box for main map to reduce whitespace
+# ─────────────────────────────────────────────
+
+# Create a tighter bounding box around Australia + marine area
+# First get the extent of commonwealth waters to determine western boundary
+commonwealth_bbox <- st_bbox(commonwealth_waters)
+australia_bbox <- st_bbox(terrestrial_areas)
+
+# Use commonwealth waters western boundary + small margin, but reasonable margins elsewhere
+expanded_bbox <- st_bbox(c(
+  xmin = commonwealth_bbox["xmin"] - 50000,   # Just 50km west of commonwealth waters
+  xmax = australia_bbox["xmax"] + 200000,     # 200km east of land
+  ymin = australia_bbox["ymin"] - 800000,     # 800km south of land
+  ymax = australia_bbox["ymax"] + 200000      # 200km north of land
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(3577)
+
+# ─────────────────────────────────────────────
+# 3. Define Tasmania bbox and crop for inset
+# ─────────────────────────────────────────────
+
+# Tasmania bounding box in WGS84, then transform
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+# Crop data for inset
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+
+state_waters_crop <- st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+all_managed_crop <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_crop, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_crop <- st_difference(bbox_albers, st_union(all_managed_crop))
+
+# ─────────────────────────────────────────────
+# 4. Prepare cropped Australia data for main map (to reduce whitespace)
+# ─────────────────────────────────────────────
+
+terrestrial_areas_full <- st_intersection(terrestrial_areas, expanded_bbox)
+coastal_waters_full <- st_intersection(coastal_waters, expanded_bbox)
+commonwealth_full <- st_intersection(commonwealth_waters, expanded_bbox)
+
+state_waters_full <- st_difference(coastal_waters_full, st_union(terrestrial_areas_full))
+
+all_managed_full <- bind_rows(
+  st_set_geometry(commonwealth_full, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_full, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_full, "geometry") %>% mutate(zone_type = "Terrestrial")
+)
+
+high_seas_full <- st_difference(expanded_bbox, st_union(all_managed_full))
+
+# Create Tasmania highlight box for main map using the oceanic bounding box
+tas_bbox <- bbox_albers %>%
+  st_sf()
+
+highlight_color <- "#FDE725FF"  # bright yellow-green
+
+# ─────────────────────────────────────────────
+# 5. Create maps with improved layout
+# ─────────────────────────────────────────────
+
+# MAIN MAP with tighter bounds
+main_map <- tm_shape(high_seas_full) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.2, title = "High Seas") +
+  tm_shape(terrestrial_areas_full) +
+  tm_polygons(col = "grey40", alpha = 0.6, title = "Land") +
+  tm_shape(commonwealth_full) +
+  tm_polygons(col = "#21908C", alpha = 0.2, title = "Commonwealth Waters") +
+  tm_shape(state_waters_full) +
+  tm_polygons(col = "#3B528B", alpha = 0.2, title = "State Waters") +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2, title = "Finfish Farms") +
+  tm_shape(tas_bbox) +
+  tm_borders(col = highlight_color, lwd = 4, lty = "solid") +
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "bottom",
+            legend.outside.size = 0.15,
+            legend.title.size = 1.0,
+            legend.text.size = 0.7,
+            frame = FALSE)
+
+# INSET MAP with proper coordinate handling to prevent tilting
+inset_map <- tm_shape(high_seas_crop) +
+  tm_polygons(col = "#A6DBA0", alpha = 0.2) +
+  tm_shape(commonwealth_crop) +
+  tm_polygons(col = "#21908C", alpha = 0.2) +
+  tm_shape(state_waters_crop) +
+  tm_polygons(col = "#3B528B", alpha = 0.2) +
+  tm_shape(terrestrial_areas_crop) +
+  tm_polygons(col = "grey40", alpha = 0.6) +
+  tm_shape(finfish_farms) +
+  tm_polygons(col = "#FA8072", border.col = "#FA8072", lwd = 2) +
+  tm_layout(frame = FALSE,           # Remove frame
+            bg.color = "white", 
+            legend.show = FALSE, 
+            title = "Tasmania", 
+            title.size = 1.2,
+            title.position = c("center", "top"),
+            inner.margins = c(0, 0, 0, 0),  # Remove inner margins
+            outer.margins = c(0, 0, 0, 0))  # Remove outer margins
+
+# ─────────────────────────────────────────────
+# 6. Export maps and create composite with better positioning
+# ─────────────────────────────────────────────
+
+# Create output directory
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save as temporary images
+main_file <- here("Figures", "Australia_map_temp_improved.png")
+inset_file <- here("Figures", "Tasmania_inset_temp_improved.png")
+
+# Save maps to PNG with better dimensions and no borders
+tmap_save(main_map, filename = main_file, width = 14, height = 9, dpi = 300)
+tmap_save(inset_map, filename = inset_file, width = 5, height = 4, dpi = 300)
+
+# Read the PNGs
+main_img <- readPNG(main_file)
+inset_img <- readPNG(inset_file)
+
+# ─────────────────────────────────────────────
+# 7. Create composite with better inset positioning
+# ─────────────────────────────────────────────
+
+# Save the improved composite map
+png(filename = here("Figures", "Australia_with_Tasmania_inset_improved.png"),
+    width = 14, height = 9, units = "in", res = 300)
+
+# Plot main map
+grid.newpage()
+grid.raster(main_img)
+
+# Position inset on the right side (away from Tasmania location on main map)
+# Using positioning that keeps it within bounds but on the right
+pushViewport(viewport(x = 0.75, y = 0.2, width = 0.25, height = 0.25, 
+                     just = c("center", "center")))
+grid.raster(inset_img)
+grid.rect(gp = gpar(col = highlight_color, fill = NA, lwd = 3))  # Add border around inset
+popViewport()
+
+dev.off()
+
+# Also display in RStudio
+grid.newpage()
+grid.raster(main_img)
+pushViewport(viewport(x = 0.75, y = 0.2, width = 0.25, height = 0.25, 
+                     just = c("center", "center")))
+grid.raster(inset_img)
+grid.rect(gp = gpar(col = highlight_color, fill = NA, lwd = 3))
+popViewport()
+
+# Print completion message
+cat("Improved map saved as: Australia_with_Tasmania_inset_improved.png\n")
+
+```
+
+
+
+
+#INSET MAP GGPLOT
+```{r}
+# TASMANIA STUDY AREA MAP - GGPLOT2 VERSION
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(ggplot2)
+
+cat("=== GGPLOT2 TASMANIA STUDY AREA MAP ===\n")
+
+# ─────────────────────────────────────────────
+# 1. Load and clean data (same as before)
+# ─────────────────────────────────────────────
+
+cat("Loading data...\n")
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid() %>%
+  filter(!st_is_empty(.))
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+# ─────────────────────────────────────────────
+# 2. Create Tasmania study area and map extent
+# ─────────────────────────────────────────────
+
+cat("Creating Tasmania study area...\n")
+tas_study_box <- st_bbox(c(
+  xmin = 140.995, xmax = 153.005, 
+  ymin = -47.255, ymax = -38.995
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577) %>%
+  st_sf()
+
+# Create map extent
+tas_bounds <- st_bbox(tas_study_box)
+aus_bounds <- st_bbox(terrestrial_areas)
+
+map_extent <- st_bbox(c(
+  xmin = min(tas_bounds["xmin"], aus_bounds["xmin"]) - 500000,
+  xmax = max(tas_bounds["xmax"], aus_bounds["xmax"]) + 500000,
+  ymin = min(tas_bounds["ymin"], aus_bounds["ymin"]) - 300000,
+  ymax = max(tas_bounds["ymax"], aus_bounds["ymax"]) + 500000
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(3577)
+
+# ─────────────────────────────────────────────
+# 3. Process spatial data (same as before)
+# ─────────────────────────────────────────────
+
+cat("Processing spatial data...\n")
+terrestrial_full <- tryCatch(
+  st_intersection(terrestrial_areas, map_extent),
+  error = function(e) terrestrial_areas
+)
+
+coastal_full <- tryCatch(
+  st_intersection(coastal_waters, map_extent),
+  error = function(e) coastal_waters
+)
+
+commonwealth_full <- tryCatch(
+  st_intersection(commonwealth_waters, map_extent),
+  error = function(e) commonwealth_waters
+)
+
+state_waters_full <- tryCatch(
+  st_difference(coastal_full, st_union(terrestrial_full)),
+  error = function(e) coastal_full
+)
+
+high_seas_full <- tryCatch(
+  st_difference(map_extent, st_union(c(terrestrial_full, coastal_full, commonwealth_full))),
+  error = function(e) {
+    st_difference(map_extent, st_union(terrestrial_full))
+  }
+)
+
+# ─────────────────────────────────────────────
+# 4. Create ggplot2 map with proper legend
+# ─────────────────────────────────────────────
+
+cat("Creating ggplot2 map...\n")
+
+# Define colors
+colors <- c(
+  "High Seas" = "#A6DBA0",
+  "Land" = "grey40", 
+  "Commonwealth Waters" = "#21908C",
+  "State Waters" = "#3B528B",
+  "Finfish Farms" = "#FA8072",
+  "Tasmania Study Area" = "#0F52BA"
+)
+
+# Create the map
+ggplot_map <- ggplot() +
+  # High seas
+  geom_sf(data = high_seas_full, 
+          aes(fill = "High Seas"), 
+          alpha = 0.2, color = NA) +
+  # Land
+  geom_sf(data = terrestrial_full, 
+          aes(fill = "Land"), 
+          alpha = 0.6, color = "grey40", size = 0.1) +
+  # Commonwealth waters
+  geom_sf(data = commonwealth_full, 
+          aes(fill = "Commonwealth Waters"), 
+          alpha = 0.2, color = NA) +
+  # State waters
+  geom_sf(data = state_waters_full, 
+          aes(fill = "State Waters"), 
+          alpha = 0.3, color = NA) +
+  # Finfish farms
+  geom_sf(data = finfish_farms, 
+          aes(fill = "Finfish Farms"), 
+          alpha = 1.0, color = "#FA8072", size = 2) +
+  # Tasmania study area box
+  geom_sf(data = tas_study_box, 
+          aes(color = "Tasmania Study Area"), 
+          fill = "transparent", size = 4) +
+  # Colors and legend
+  scale_fill_manual(
+    name = "Map Legend",
+    values = colors,
+    guide = guide_legend(override.aes = list(alpha = c(0.2, 1.0, 0.2, 0.6, 0.3)))
+  ) +
+  scale_color_manual(
+    name = "",
+    values = colors,
+    guide = guide_legend(override.aes = list(fill = "transparent", alpha = 1))
+  ) +
+  # Theme and layout
+  theme_void() +
+  theme(
+    legend.position = c(0.02, 0.02),
+    legend.justification = c(0, 0),
+    legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+    legend.margin = margin(5, 5, 5, 5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  # Set coordinate limits
+  coord_sf(expand = FALSE)
+
+# ─────────────────────────────────────────────
+# 5. Save the map
+# ─────────────────────────────────────────────
+
+cat("Saving ggplot2 map...\n")
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+output_file <- here("Figures", "Tasmania_Study_Area_ggplot2_5aug.png")
+
+ggsave(
+  filename = output_file,
+  plot = ggplot_map,
+  width = 16, height = 10, 
+  dpi = 300, units = "in",
+  bg = "white"
+)
+
+cat("ggplot2 map saved successfully:", output_file, "\n")
+
+# Display the map
+print(ggplot_map)
+```
+
+
+```{r}
+# COMPLETE FIXED TASMANIA MAP CODE AUG 5
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(cowplot)
+# ─────────────────────────────────────────────
+# 1. Load and clean data (same as before)
+# ─────────────────────────────────────────────
+
+cat("Loading data...\n")
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid() %>%
+  filter(!st_is_empty(.))
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+finfish_farms <- st_read(here("raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp")) %>%
+  st_transform(3577) %>%
+  st_make_valid()
+
+# ─────────────────────────────────────────────
+# 2. Create Tasmania study area and map extent
+# ─────────────────────────────────────────────
+
+cat("Creating Tasmania study area...\n")
+tas_study_box <- st_bbox(c(
+  xmin = 140.995, xmax = 153.005, 
+  ymin = -47.255, ymax = -38.995
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577) %>%
+  st_sf()
+
+# Create map extent
+tas_bounds <- st_bbox(tas_study_box)
+aus_bounds <- st_bbox(terrestrial_areas)
+
+map_extent <- st_bbox(c(
+  xmin = min(tas_bounds["xmin"], aus_bounds["xmin"]) - 500000,
+  xmax = max(tas_bounds["xmax"], aus_bounds["xmax"]) + 500000,
+  ymin = min(tas_bounds["ymin"], aus_bounds["ymin"]) - 300000,
+  ymax = max(tas_bounds["ymax"], aus_bounds["ymax"]) + 500000
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(3577)
+
+# ─────────────────────────────────────────────
+# 3. Process spatial data (same as before)
+# ─────────────────────────────────────────────
+
+cat("Processing spatial data...\n")
+terrestrial_full <- tryCatch(
+  st_intersection(terrestrial_areas, map_extent),
+  error = function(e) terrestrial_areas
+)
+
+coastal_full <- tryCatch(
+  st_intersection(coastal_waters, map_extent),
+  error = function(e) coastal_waters
+)
+
+commonwealth_full <- tryCatch(
+  st_intersection(commonwealth_waters, map_extent),
+  error = function(e) commonwealth_waters
+)
+
+state_waters_full <- tryCatch(
+  st_difference(coastal_full, st_union(terrestrial_full)),
+  error = function(e) coastal_full
+)
+
+high_seas_full <- tryCatch(
+  st_difference(map_extent, st_union(c(terrestrial_full, coastal_full, commonwealth_full))),
+  error = function(e) {
+    st_difference(map_extent, st_union(terrestrial_full))
+  }
+)
+```
+
+#MAP CREATION
+```{r}
+cat("Creating Tasmania maps with prominent finfish farms...\n")
+
+# ─────────────────────────────────────────────
+# 1. Define colors and create Tasmania variables
+# ─────────────────────────────────────────────
+
+colors <- c(
+  "High Seas" = "#CCEBC5",
+  "Land" = "#636363", 
+  "Commonwealth Waters" = "#80B1D3",
+  "State Waters" = "#377EB8",
+  "Finfish Farms" = "#E41A1C"
+)
+
+# Create Tasmania study area bounding box
+tas_study_box <- st_bbox(c(
+  xmin = 140.995, xmax = 153.005, 
+  ymin = -47.255, ymax = -38.995
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577) %>%
+  st_sf()
+
+# Define Tasmania extent variables for inset
+tas_bbox <- st_bbox(tas_study_box)
+tas_buffer <- 50000  # 50km buffer around Tasmania study area
+
+# ─────────────────────────────────────────────
+# 2. Create Tasmania inset map (clean, no borders/title/legend)
+# ─────────────────────────────────────────────
+
+inset_map <- ggplot() +
+  geom_sf(data = high_seas_tas, fill = "#CCEBC5", alpha = 0.2, color = NA) +
+  geom_sf(data = commonwealth_tas, fill = "#80B1D3", alpha = 0.3, color = NA) +
+  geom_sf(data = state_waters_tas, fill = "#377EB8", alpha = 0.3, color = NA) +
+  geom_sf(data = terrestrial_tas, fill = "#636363", alpha = 0.6, color = "#636363", size = 0.1) +
+  geom_sf(data = finfish_farms, fill = "#E41A1C", alpha = 1.0, color = "#E41A1C", size = 3) +
+  geom_sf(data = tas_study_box, fill = "transparent", color = "#0F52BA", size = 4) +
+  theme_void() +
+  theme(
+    panel.background = element_blank(),  # No background
+    plot.background = element_blank(),   # No background
+    plot.margin = margin(0, 0, 0, 0),    # No margins
+    legend.position = "none"             # No legend
+  ) +
+  coord_sf(
+    expand = FALSE,
+    xlim = c(tas_bbox["xmin"] - tas_buffer, tas_bbox["xmax"] + tas_buffer),
+    ylim = c(tas_bbox["ymin"] - tas_buffer, tas_bbox["ymax"] + tas_buffer)
+  )
+
+# ─────────────────────────────────────────────
+# 3. Create the main map
+# ─────────────────────────────────────────────
+
+main_map <- ggplot() +
+  geom_sf(data = high_seas_full, aes(fill = "High Seas"), alpha = 0.2, color = NA) +
+  geom_sf(data = terrestrial_full, aes(fill = "Land"), alpha = 0.6, color = "#636363", size = 0.1) +
+  geom_sf(data = commonwealth_full, aes(fill = "Commonwealth Waters"), alpha = 0.3, color = NA) +
+  geom_sf(data = state_waters_full, aes(fill = "State Waters"), alpha = 0.3, color = NA) +
+  geom_sf(data = finfish_farms, aes(fill = "Finfish Farms"), alpha = 1.0, color = "#E41A1C", size = 2) +
+  geom_sf(data = tas_study_box, aes(color = "Tasmania Study Area"), fill = "transparent", size = 3) +
+  scale_fill_manual(
+    name = "Map Legend",
+    values = colors,
+    guide = guide_legend(
+      override.aes = list(alpha = c(0.2, 0.6, 0.3, 0.3, 1.0), color = "black", size = 1.5)
+    )
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("Tasmania Study Area" = "#0F52BA"),
+    guide = guide_legend(
+      override.aes = list(fill = NA, color = "#0F52BA", size = 3, linetype = "solid")
+    )
+  ) +
+  theme_void() +
+  theme(
+    legend.position = c(0.25, 0.50),     # adjust
+    legend.justification = c(1, 0),      # Anchor position
+    legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+    legend.margin = margin(5, 5, 5, 5),
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 7),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  coord_sf(expand = FALSE)
+
+# ─────────────────────────────────────────────
+# 4. Function to combine main and inset maps
+# ─────────────────────────────────────────────
+
+create_combined_map <- function() {
+  ggdraw() +
+    draw_plot(main_map) +
+    draw_plot(inset_map, x = 0.01, y = 0.02, width = 0.4, height = 0.45)  # Far west and bottom
+}
+
+# ─────────────────────────────────────────────
+# 5. Save maps
+# ─────────────────────────────────────────────
+
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save main map
+cat("Saving main map...\n")
+ggsave(
+  filename = here("Figures", "Main_Map_Updated_5aug.png"),
+  plot = main_map,
+  width = 16,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save inset map
+cat("Saving inset map...\n")
+ggsave(
+  filename = here("Figures", "Inset_Map_Updated_5aug.png"),
+  plot = inset_map,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save combined map
+cat("Saving combined map...\n")
+combined_plot <- create_combined_map()
+ggsave(
+  filename = here("Figures", "Tasmania_Study_Area_with_Inset_Updated_5aug.png"),
+  plot = combined_plot,
+  width = 16,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+cat("All maps saved successfully!\n")
+
+# Display the maps
+print("Main map:")
+print(main_map)
+print("Combined map with inset:")
+print(combined_plot)
+
+```
+#FLIPPED APPROACH
+```{r}
+# TASMANIA MAIN MAP WITH AUSTRALIA INSET (Following DataWim Approach)
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(cowplot)
+
+cat("Creating Tasmania-focused map with Australia inset...\n")
+
+# ─────────────────────────────────────────────
+# 1. Define colors and create Tasmania variables
+# ─────────────────────────────────────────────
+
+colors <- c(
+  "high seas" = "#CCEBC5",
+  "Land" = "#636363", 
+  "Commonwealth waters" = "#80B1D3",
+  "state waters" = "#2E7D32",
+  "Finfish farms" = "#E41A1C"
+)
+
+# Create Tasmania study area bounding box
+tas_study_box <- st_bbox(c(
+  xmin = 140.995, xmax = 153.005, 
+  ymin = -47.255, ymax = -38.995
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577) %>%
+  st_sf()
+
+# Define Tasmania extent variables
+tas_bbox <- st_bbox(tas_study_box)
+tas_buffer <- 50000  # 50km buffer around Tasmania study area
+
+# ─────────────────────────────────────────────
+# 2. Create Tasmania extent for cropping data
+# ─────────────────────────────────────────────
+
+tas_extent <- st_polygon(list(cbind(
+  c(tas_bbox["xmin"] - tas_buffer, tas_bbox["xmax"] + tas_buffer, 
+    tas_bbox["xmax"] + tas_buffer, tas_bbox["xmin"] - tas_buffer, 
+    tas_bbox["xmin"] - tas_buffer),
+  c(tas_bbox["ymin"] - tas_buffer, tas_bbox["ymin"] - tas_buffer, 
+    tas_bbox["ymax"] + tas_buffer, tas_bbox["ymax"] + tas_buffer, 
+    tas_bbox["ymin"] - tas_buffer)
+))) %>%
+  st_sfc(crs = 3577) %>%
+  st_sf()
+
+# Crop data to Tasmania region
+terrestrial_tas <- tryCatch(
+  st_intersection(terrestrial_full, tas_extent),
+  error = function(e) st_crop(terrestrial_full, tas_bbox)
+)
+
+commonwealth_tas <- tryCatch(
+  st_intersection(commonwealth_full, tas_extent),
+  error = function(e) st_crop(commonwealth_full, tas_bbox)
+)
+
+state_waters_tas <- tryCatch(
+  st_intersection(state_waters_full, tas_extent),
+  error = function(e) st_crop(state_waters_full, tas_bbox)
+)
+
+high_seas_tas <- tryCatch(
+  st_intersection(high_seas_full, tas_extent),
+  error = function(e) st_crop(high_seas_full, tas_bbox)
+)
+
+# ─────────────────────────────────────────────
+# 3. Create MAIN MAP - Tasmania Study Area (Large, Detailed)
+# ─────────────────────────────────────────────
+
+main_map_tasmania <- ggplot() +
+  # High seas background
+  geom_sf(data = high_seas_tas, aes(fill = "high seas"), alpha = 0.2, color = NA) +
+  
+  # Commonwealth waters
+  geom_sf(data = commonwealth_tas, aes(fill = "Commonwealth waters"), alpha = 0.3, color = NA) +
+  
+  # State waters
+  geom_sf(data = state_waters_tas, aes(fill = "state waters"), alpha = 0.3, color = NA) +
+  
+  # Land areas
+  geom_sf(data = terrestrial_tas, aes(fill = "Land"), alpha = 0.8, color = "#636363", size = 0.2) +
+  
+  # Finfish farms - very prominent in main map
+  geom_sf(data = finfish_farms, aes(fill = "Finfish farms"), alpha = 1.0, color = "#E41A1C", size = 6) +
+  
+  # Tasmania study area boundary - prominent border
+  geom_sf(data = tas_study_box, aes(color = "Tasmania Study Area"), fill = "transparent", size = 4) +
+  
+  scale_fill_manual(
+    name = "Map Legend",
+    values = colors,
+    guide = guide_legend(
+      override.aes = list(alpha = c(0.3, 1.0, 0.2, 0.8, 0.3), color = "black", size = 2)
+    )
+  ) +
+  
+  scale_color_manual(
+    name = "",
+    values = c("Tasmania Study Area" = "#0F52BA"),
+    guide = guide_legend(
+      override.aes = list(fill = NA, color = "#0F52BA", size = 3, linetype = "solid")
+    )
+  ) +
+  
+  theme_void() +
+  theme(
+    legend.position = c(0.02, 0.02),     # Bottom left
+    legend.justification = c(0, 0),
+    legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+    legend.margin = margin(5, 5, 5, 5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    plot.margin = margin(5, 5, 5, 5),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  ) +
+  
+  coord_sf(
+    expand = FALSE,
+    xlim = c(tas_bbox["xmin"] - tas_buffer, tas_bbox["xmax"] + tas_buffer),
+    ylim = c(tas_bbox["ymin"] - tas_buffer, tas_bbox["ymax"] + tas_buffer)
+  ) 
+  
+  #labs(title = "Tasmania Study Area - Marine Zones and Finfish Farms")
+
+# ─────────────────────────────────────────────
+# 4. Create INSET MAP - Australia Overview (Small, Context)
+# ─────────────────────────────────────────────
+
+inset_map_australia <- ggplot() +
+  # High seas background
+  geom_sf(data = high_seas_full, fill = "#CCEBC5", alpha = 0.3, color = NA) +
+  
+  # Land areas
+  geom_sf(data = terrestrial_full, fill = "#636363", alpha = 0.8, color = "black", size = 0.1) +
+  
+  # Commonwealth waters
+  geom_sf(data = commonwealth_full, fill = "#80B1D3", alpha = 0.4, color = NA) +
+  
+  # State waters
+  geom_sf(data = state_waters_full, fill = "#2E7D32", alpha = 0.4, color = NA) +
+  
+  # Tasmania study area - highlighted box for context
+  geom_sf(data = tas_study_box, fill = "transparent", color = "#0F52BA", size = 2) +
+  
+  theme_void() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black", size = 1),
+    plot.background = element_rect(fill = "white", color = "black", size = 1),
+    plot.margin = margin(2, 2, 2, 2),
+    plot.title = element_text(size = 10, hjust = 0.5, face = "bold")
+  ) +
+  
+  coord_sf(expand = FALSE) 
+  
+  #labs(title = "Australia Context")
+
+# ─────────────────────────────────────────────
+# 5. Function to combine Tasmania main map with Australia inset
+# ─────────────────────────────────────────────
+
+create_publication_map <- function() {
+  ggdraw() +
+    draw_plot(main_map_tasmania) +
+    draw_plot(inset_map_australia, x = 0.7, y = 0.7, width = 0.28, height = 0.28)
+}
+
+# ─────────────────────────────────────────────
+# 6. Save maps following publication standards
+# ─────────────────────────────────────────────
+
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save Tasmania main map
+cat("Saving Tasmania main map...\n")
+ggsave(
+  filename = here("Figures", "Tasmania_Main_Map_Publication.png"),
+  plot = main_map_tasmania,
+  width = 12,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save Australia context inset
+cat("Saving Australia context inset...\n")
+ggsave(
+  filename = here("Figures", "Australia_Context_Inset.png"),
+  plot = inset_map_australia,
+  width = 6,
+  height = 5,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save publication-quality combined map
+cat("Saving publication-quality combined map...\n")
+publication_map <- create_publication_map()
+ggsave(
+  filename = here("Figures", "Tasmania_Publication_Map_with_Australia_Inset.png"),
+  plot = publication_map,
+  width = 12,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+cat("Publication-quality maps saved successfully!\n")
+
+# Display the maps
+print("Tasmania main map:")
+print(main_map_tasmania)
+print("Publication map with Australia inset:")
+print(publication_map)
+```
+#BUBBLE FLIPPED APPROACH
+
+```{r}
+# TASMANIA MAP WITH BUBBLE FINFISH FARMS
+```{r}
+# Load required libraries
+library(sf)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(cowplot)
+
+cat("Creating Tasmania map with bubble finfish farms...\n")
+
+# ─────────────────────────────────────────────
+# 1. Define colors and create Tasmania variables
+# ─────────────────────────────────────────────
+
+colors <- c(
+  "high seas" = "#CCEBC5",
+  "Land" = "#636363", 
+  "Commonwealth waters" = "#80B1D3",
+  "state waters" = "#2E7D32",
+  "Finfish farms" = "#E41A1C"
+)
+
+# Create Tasmania study area bounding box
+tas_study_box <- st_bbox(c(
+  xmin = 140.995, xmax = 153.005, 
+  ymin = -47.255, ymax = -38.995
+)) %>%
+  st_as_sfc() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577) %>%
+  st_sf()
+
+# Define Tasmania extent variables
+tas_bbox <- st_bbox(tas_study_box)
+tas_buffer <- 50000  # 50km buffer around Tasmania study area
+
+# ─────────────────────────────────────────────
+# 2. Create Tasmania extent for cropping data
+# ─────────────────────────────────────────────
+
+tas_extent <- st_polygon(list(cbind(
+  c(tas_bbox["xmin"] - tas_buffer, tas_bbox["xmax"] + tas_buffer, 
+    tas_bbox["xmax"] + tas_buffer, tas_bbox["xmin"] - tas_buffer, 
+    tas_bbox["xmin"] - tas_buffer),
+  c(tas_bbox["ymin"] - tas_buffer, tas_bbox["ymin"] - tas_buffer, 
+    tas_bbox["ymax"] + tas_buffer, tas_bbox["ymax"] + tas_buffer, 
+    tas_bbox["ymin"] - tas_buffer)
+))) %>%
+  st_sfc(crs = 3577) %>%
+  st_sf()
+
+# Crop data to Tasmania region
+terrestrial_tas <- tryCatch(
+  st_intersection(terrestrial_full, tas_extent),
+  error = function(e) st_crop(terrestrial_full, tas_bbox)
+)
+
+commonwealth_tas <- tryCatch(
+  st_intersection(commonwealth_full, tas_extent),
+  error = function(e) st_crop(commonwealth_full, tas_bbox)
+)
+
+state_waters_tas <- tryCatch(
+  st_intersection(state_waters_full, tas_extent),
+  error = function(e) st_crop(state_waters_full, tas_bbox)
+)
+
+high_seas_tas <- tryCatch(
+  st_intersection(high_seas_full, tas_extent),
+  error = function(e) st_crop(high_seas_full, tas_bbox)
+)
+
+# ─────────────────────────────────────────────
+# 3. Prepare finfish farms for bubble plotting
+# ─────────────────────────────────────────────
+
+# Convert finfish farms to centroids (points) for bubble plotting
+finfish_centroids <- st_centroid(finfish_farms)
+
+# You can also add a size variable if you want different sized bubbles
+# For example, if you have area data:
+# finfish_centroids$bubble_size <- sqrt(st_area(finfish_farms)) / 1000  # Scale as needed
+
+
+# ─────────────────────────────────────────────
+# 4. Create MAIN MAP - Tasmania Study Area with Bubble Farms
+# ─────────────────────────────────────────────
+
+main_map_tasmania <- ggplot() +
+  # High seas background
+  geom_sf(data = high_seas_tas, aes(fill = "high seas"), alpha = 0.2, color = NA) +
+  
+  # Commonwealth waters
+  geom_sf(data = commonwealth_tas, aes(fill = "Commonwealth waters"), alpha = 0.3, color = NA) +
+  
+  # State waters
+  geom_sf(data = state_waters_tas, aes(fill = "state waters"), alpha = 0.3, color = NA) +
+  
+  # Land areas
+  geom_sf(data = terrestrial_tas, aes(fill = "Land"), alpha = 0.8, color = "#636363", size = 0.2) +
+  
+  # Finfish farms as BUBBLES - much more visible!
+  geom_sf(data = finfish_centroids, 
+          aes(fill = "Finfish farms"),
+          shape = 21,           # Circle shape
+          size = 2,             # Bubble size
+          color = "black",      # Black outline
+          stroke = 1.5,         # Outline thickness
+          alpha = 0.9) +
+  
+  # Tasmania study area boundary - prominent border
+  geom_sf(data = tas_study_box, aes(color = "Tasmania Study Area"), fill = "transparent", size = 4) +
+  
+  scale_fill_manual(
+    name = "Map Legend",
+    values = colors,
+    guide = guide_legend(
+      override.aes = list(
+        alpha = c(0.3, 1.0, 0.3, 0.8, 0.3), 
+        color = c("black", "black", "black", "black", "black"), 
+        size = c(2, 2, 2, 2, 5),
+        shape = c(22, 22, 22, 22, 21)  # Circles for finfish farms
+      )
+    )
+  ) +
+  
+  scale_color_manual(
+    name = "",
+    values = c("Tasmania Study Area" = "#0F52BA"),
+    guide = guide_legend(
+      override.aes = list(fill = NA, color = "#0F52BA", size = 3, linetype = "solid")
+    )
+  ) +
+  
+  theme_void() +
+  theme(
+    legend.position = c(0.02, 0.02),
+    legend.justification = c(0, 0),
+    legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+    legend.margin = margin(5, 5, 5, 5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  
+  coord_sf(
+    expand = FALSE,
+    xlim = c(tas_bbox["xmin"] - tas_buffer, tas_bbox["xmax"] + tas_buffer),
+    ylim = c(tas_bbox["ymin"] - tas_buffer, tas_bbox["ymax"] + tas_buffer)
+  )
+
+# ─────────────────────────────────────────────
+# 5. Create INSET MAP - Australia Overview
+# ─────────────────────────────────────────────
+
+inset_map_australia <- ggplot() +
+  # High seas background
+  geom_sf(data = high_seas_full, fill = "#CCEBC5", alpha = 0.3, color = NA) +
+  
+  # Land areas
+  geom_sf(data = terrestrial_full, fill = "#636363", alpha = 0.8, color = "black", size = 0.1) +
+  
+  # Commonwealth waters
+  geom_sf(data = commonwealth_full, fill = "#80B1D3", alpha = 0.4, color = NA) +
+  
+  # State waters
+  geom_sf(data = state_waters_full, fill = "#2E7D32", alpha = 0.4, color = NA) +
+  
+  # Finfish farms as small bubbles in inset
+  geom_sf(data = finfish_centroids, 
+          fill = "#E41A1C",
+          shape = 21,
+          size = 0.4,            # Smaller in inset
+          color = "black",
+          stroke = 0.5,
+          alpha = 0.9) +
+  
+  # Tasmania study area - highlighted box for context
+  geom_sf(data = tas_study_box, fill = "transparent", color = "#0F52BA", size = 2) +
+  
+  theme_void() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black", size = 1),
+    plot.background = element_rect(fill = "white", color = "black", size = 1),
+    plot.margin = margin(2, 2, 2, 2)
+  ) +
+  
+  coord_sf(expand = FALSE)
+
+# ─────────────────────────────────────────────
+# 6. Function to combine maps
+# ─────────────────────────────────────────────
+
+create_publication_map <- function() {
+  ggdraw() +
+    draw_plot(main_map_tasmania) +
+    draw_plot(inset_map_australia, x = 0.7, y = 0.7, width = 0.28, height = 0.28)
+}
+
+# ─────────────────────────────────────────────
+# 7. Save maps
+# ─────────────────────────────────────────────
+
+if (!dir.exists(here("Figures"))) dir.create(here("Figures"))
+
+# Save Tasmania main map
+cat("Saving Tasmania main map with bubble farms...\n")
+ggsave(
+  filename = here("Figures", "Tasmania_Main_Map_Bubble_Farms_Final.png"),
+  plot = main_map_tasmania,
+  width = 12,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save Australia context inset
+cat("Saving Australia context inset with bubble farms...\n")
+ggsave(
+  filename = here("Figures", "Australia_Context_Inset_Bubble_Farms.png"),
+  plot = inset_map_australia,
+  width = 6,
+  height = 5,
+  dpi = 300,
+  bg = "white"
+)
+
+# Save publication-quality combined map
+cat("Saving publication map with bubble farms...\n")
+publication_map <- create_publication_map()
+ggsave(
+  filename = here("Figures", "Tasmania_Publication_Final_Bubble_Farms.png"),
+  plot = publication_map,
+  width = 12,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
+
+cat("Bubble farm maps saved successfully!\n")
+
+# Display the maps
+print("Tasmania main map with bubble farms:")
+print(main_map_tasmania)
+print("Publication map:")
+print(publication_map)
+```
+

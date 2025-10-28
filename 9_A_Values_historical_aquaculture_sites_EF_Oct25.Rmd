@@ -1,0 +1,171 @@
+---
+title: "9_A_Values_historical_aquacultrure_sites_reproj"
+date: 1st version "2024-11-21" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(here)
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+```
+
+#lets check amount of days per decade over 17C on aquaculture sites that had mortalities and the ones that didnt 
+
+```{r}
+daysover_17C_historical<- read_rds(here("raw_data/Data17/jplMUR41_daysover_17C_TAS_20110101-20201231.rds")) %>%
+  unwrap()
+plot(daysover_17C_historical)
+```
+#Where are the aquaculture sites today ?and how are they in terms of days over 17C a decade?
+```{r}
+finfish_aqua_TAS<-vect("D:/Documents_HD/USC_Climate_smart_aquaculture/R_Code/raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp")
+```
+
+```{r}
+finfish_aqua_TAS_reproj<-project(finfish_aqua_TAS, daysover_17C_historical)
+```
+
+```{r}
+finfish_aqua_TAS_sf <- st_as_sf(finfish_aqua_TAS_reproj)
+```
+```{r}
+finfish_aqua_TAS_df<- as.data.frame(finfish_aqua_TAS_reproj, xy= TRUE)
+```
+
+
+#and how are the aquaculture sites in terms of days over 17C a decade?
+#extract worked while intersect didnt 
+```{r}
+aqua_farms_daysover17C<-intersect(daysover_17C_historical, finfish_aqua_TAS_reproj)
+aqua_farms_daysover17C_ex<- terra::extract(daysover_17C_historical, finfish_aqua_TAS_reproj)
+```
+
+```{r}
+aqua_farms_daysover17C_exloc<- terra::extract(daysover_17C_historical, finfish_aqua_TAS_reproj, xy= TRUE)
+```
+
+
+```{r}
+sf_extract_aqua_farms_daysover17C<-st_as_sf(aqua_farms_daysover17C_exloc, coords = c("x", "y"), crs = 4326) # Assuming WGS84 (EPSG:4326)
+```
+
+```{r}
+tmap_mode("view")
+```
+
+```{r}
+tm_shape(sf_extract_aqua_farms_daysover17C) +
+  tm_dots(col = "X201", size = 0.1, palette = "viridis", title = "number of days over 17C in a decade") +
+  tm_basemap("OpenStreetMap") +
+  tm_layout(title = "Historical days over 17C", legend.outside = TRUE)
+```
+
+
+```{r}
+qtm(daysover_17C_historical, "Esri.WorldImagery")
+```
+
+```{r}
+tmap_mode("view")
+```
+
+
+```{r}
+
+qtm(daysover_17C_historical, basemaps = "Esri.WorldImagery")+
+  qtm(finfish_aqua_TAS_sf)
+  
+```
+#avalilable styles for this kind of map: 
+#"cont": continuous values.
+#"fixed": Define your own custom breaks explicitly.
+#"equal": Equal-width intervals across the range of values.
+#"pretty": R creates "nice-looking" rounded breaks.
+#"quantile": Each category has an equal number of data points.
+#"jenks": Uses natural breaks (optimized for data distribution).
+#"hclust", "kmeans", etc.: More advanced clustering-based methods.
+
+```{r}
+# Create the map with customized legend breaks
+tm_shape(daysover_17C_historical) +
+  tm_raster(style = "cont", breaks = seq(min(daysover_17C_historical[], na.rm = TRUE), 
+                                         max(daysover_17C_historical[], na.rm = TRUE), 
+                                         length.out = 20), 
+            title = "Days Over 17°C") +
+  tm_shape(finfish_aqua_TAS_sf) +
+  tm_borders(col = "black") +
+  tm_basemap("Esri.WorldImagery")
+```
+
+#other types of breaks
+# Create the map with customized legend breaks
+```{r}
+tm_shape(daysover_17C_historical) +
+  tm_raster(style = "fixed", breaks = seq(min(daysover_17C_historical[], na.rm = TRUE), 
+                                         max(daysover_17C_historical[], na.rm = TRUE), 
+                                         length.out = 20), 
+            title = "Days Over 17°C") +
+  tm_shape(finfish_aqua_TAS_sf) +
+  tm_borders(col = "black") +
+  tm_basemap("Esri.WorldImagery")
+```
+
+#lets check amount of days per decade over 21C on aquaculture sites that had mortalities and the ones that didnt 
+```{r}
+daysover_21.5C_historical<- read_rds(here("raw_data/Data/jplMUR41_daysover_21.5C_TAS_20110101-20201231.rds")) %>%
+  unwrap()
+plot(daysover_21.5C_historical)
+```
+#and how are the aquaculture sites in terms of days over 21.5C a decade?
+# I dont understand why it comes as zero, that means the finfish is not on areas we have information on? 
+```{r}
+aqua_farms_daysover21.5C<-intersect(daysover_21.5C_historical, finfish_aqua_TAS_sf)
+```
+
+
+```{r}
+qtm(daysover_21.5C_historical, basemaps = "Esri.WorldImagery")+
+  qtm(finfish_aqua_TAS_sf)
+```
+
+# Create the map with customized legend breaks for 21.5C
+```{r}
+tm_shape(daysover_21.5C_historical) +
+  tm_raster(style = "fixed", breaks = seq(min(daysover_21.5C_historical[], na.rm = TRUE), 
+                                         max(daysover_21.5C_historical[], na.rm = TRUE), 
+                                         length.out = 20), 
+            title = "Days Over 21.5°C") +
+  tm_shape(finfish_aqua_TAS_sf) +
+  tm_borders(col = "black") +
+  tm_basemap("Esri.WorldImagery")
+```
+#equal
+```{r}
+tm_shape(daysover_17C_historical) +
+  tm_raster(style = "equal", breaks = seq(min(daysover_17C_historical[], na.rm = TRUE), 
+                                         max(daysover_17C_historical[], na.rm = TRUE), 
+                                         length.out = 20), 
+            title = "Days Over 17°C") +
+  tm_shape(finfish_aqua_TAS_sf) +
+  tm_borders(col = "black") +
+  tm_basemap("Esri.WorldImagery")
+```
+
+
+# Go to code 9_B_Reclass_17C_EF_Oct25 and 9_C_Reclass_21C_EF_Oct25

@@ -1,0 +1,1311 @@
+---
+title: "15-MSP_and_Climate_and_constraints_map_plotting"
+output: html_document
+date: first version"2025-01-16"/ this version 27 Oct 2025
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#In this code we will map the constraints and the climate analogues and make the composite map of the maps created. 
+
+#load packages that can me used
+```{r}
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+library(ggplot2)
+library(viridisLite)
+library(ggplot2)
+library(viridis)
+library(tidyr)
+library(readr)
+library(knitr)
+library(kableExtra)
+library(raster)
+library(cowplot)
+library(patchwork)
+library(png)
+library(grid)
+library(webshot2)
+library(magick)
+
+```
+#upload the tasmanian shapefile and the total constraints raster made before
+```{r}
+tassie_shp <- st_read(here("raw_data/tassie_shp.gpkg"))
+```
+
+```{r}
+total_constraints<- rast(here("output_data/Constraints_2024/total_constraints.tif"))
+```
+
+
+#This code:
+#1. Loads your constraint raster
+#2. Defines a function that:
+#   - Processes each climate raster
+#   - Combines it with constraints
+#   - Creates visualizations
+#  - Saves both data and maps
+#3. Processes all files for both optimal and suitable patterns
+#4. Creates organized output folders
+#5. Includes error checking throughout
+```{r}
+# Create a NEW output folder for the combined climate and MSP analysis
+
+combined_climate_MSP_output_folder_viridis_2025<- here("output_data", "Climate_MSP_Constraints_2025")
+dir.create(combined_climate_MSP_output_folder_viridis_2025, recursive = TRUE, showWarnings = FALSE)
+
+# Print the new output folder path
+cat("Results will be saved to:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+
+#--------------------------------------------------------------------------
+# Locate the climate raster files to process
+#--------------------------------------------------------------------------
+
+# Path to the climate projection files
+climate_files_path <- here("output_data", "Combined_results", "ESM_agreement")
+
+# Get all raster files in that directory
+raster_files <- list.files(
+  path = climate_files_path,
+  pattern = "\\.tif$",
+  full.names = TRUE
+)
+
+# Check if files were found
+if(length(raster_files) == 0) {
+  stop("No raster files found in: ", climate_files_path)
+} else {
+  cat("Found", length(raster_files), "raster files to process\n")
+}
+
+#--------------------------------------------------------------------------
+# Define the Main Processing Function
+#--------------------------------------------------------------------------
+
+process_climate_MSP_constraints <- function(climate_raster_path, constraint_raster, output_folder, pattern) {
+  # Print which file is being processed
+  cat("Processing file:", basename(climate_raster_path), "\n")
+  
+  # Read the climate raster with error checking
+  climate_raster <- try(rast(climate_raster_path))
+  if(inherits(climate_raster, "try-error")) {
+    cat("Error reading climate raster:", climate_raster_path, "\n")
+    return(NULL)
+  }
+  
+  # Verify both input rasters exist
+  if(is.null(climate_raster) || is.null(constraint_raster)) {
+    cat("Invalid raster input\n")
+    return(NULL)
+  }
+  
+  # Ensure climate raster is in the correct projection (Australian Albers)
+  if(crs(climate_raster) != "EPSG:3577") {
+    climate_raster <- project(climate_raster, "EPSG:3577")
+  }
+  
+  # Align constraint raster with climate raster
+  constraint_aligned <- resample(constraint_raster, climate_raster)
+  
+  # Multiply climate and constraint rasters to get combined analysis
+  # Areas unsuitable due to constraints will be masked (multiplied by 0)
+  combined_MSP_climate_analysis <- climate_raster * constraint_aligned
+  
+  # Extract information from filename to use in output names and titles
+  file_name <- basename(climate_raster_path)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # SSP scenario
+  decade_range <- paste(parts[2], parts[3], sep = "_")  # Time period
+  
+  # Create visualization
+  try({
+    # Build map using tmap
+    combined_MSP_climate_map_viridis <- tm_shape(climate_raster) +
+      # Add climate suitability layer
+      tm_raster(palette = c("#fcd225", "#c03a83", "#8606a6", "#0d0887"),
+                labels = c("No Analogue", 
+                          "Low Confidence Analogue", 
+                          "Medium Confidence Analogue", 
+                          "High Confidence Analogue"),
+                breaks = c(-0.1, 0.5, 1.5, 2.5, 3.5),  # Control legend categories
+                title = "Climate Suitability") +
+      # Add constraints layer
+      tm_shape(constraint_aligned) +
+      tm_raster(palette = c("black", NA), 
+                alpha = 0.5,
+                labels = c("Unsuitable", ""),
+                title = "Constraints",
+                breaks = c(0, 0.5, 1)) +
+      # Add Tasmania outline
+      tm_shape(st_transform(tassie_shp, crs(climate_raster))) +
+      tm_polygons(col = col = "white", border = "#373737", alpha = 0.2) +
+      # Set map layout
+      tm_layout(
+        legend.outside = TRUE,
+        legend.outside.position = "right",
+        main.title = paste("Climate Analogues with Constraints:", ssp, decade_range, "-", pattern),
+        main.title.position = "center",
+        legend.text.size = 0.7,
+        legend.title.size = 0.8,
+        frame = TRUE
+      )
+    
+    # Create separate folders for optimal and suitable patterns
+    pattern_folder <- file.path(output_folder, pattern)
+    dir.create(pattern_folder, recursive = TRUE, showWarnings = FALSE)
+    
+    # Save outputs:
+    # 1. The combined analysis raster
+    writeRaster(combined_MSP_climate_analysis,
+                filename = file.path(pattern_folder, 
+                                   paste0("combined_MSP_climate_", ssp, "_", 
+                                         decade_range, "_", pattern, ".tif")),
+                overwrite = TRUE)
+    
+    # 2. The visualization map
+    tmap_save(combined_MSP_climate_map_viridis,
+              filename = file.path(pattern_folder,
+                                 paste0("combined_MSP_climate_map_viridis_", ssp, "_",
+                                      decade_range, "_", pattern, ".png")),
+              width = 8,
+              height = 10,
+              dpi = 300)
+  })
+  
+  return(combined_MSP_climate_analysis)
+}
+
+#--------------------------------------------------------------------------
+# Process All Files
+#--------------------------------------------------------------------------
+
+# Define which patterns to process
+patterns <- c("optimal", "suitable")
+
+# Process each pattern separately
+for(pattern in patterns) {
+  # Get files for current pattern
+  pattern_files <- raster_files[grep(pattern, raster_files)]
+  
+  # Check if any files match the pattern
+  if(length(pattern_files) == 0) {
+    cat("No files found matching pattern:", pattern, "\n")
+    next
+  }
+  
+  test_file <- pattern_files[1]
+  
+  # Test with one file first
+  cat("\nTesting with", pattern, "file:", basename(test_file), "\n")
+  test_result <- try(process_climate_MSP_constraints(test_file, 
+                                                   total_constraints, 
+                                                   combined_climate_MSP_output_folder_viridis_2025,
+                                                   pattern))
+  
+  # If test succeeds, process all files for this pattern
+  if(!inherits(test_result, "try-error")) {
+    cat("\nTest successful for", pattern, "pattern, processing all files...\n")
+    combined_MSP_climate_results <- lapply(pattern_files, function(file) {
+      try(process_climate_MSP_constraints(file, 
+                                        total_constraints, 
+                                        combined_climate_MSP_output_folder_viridis_2025,
+                                        pattern))
+    })
+  } else {
+    cat("Test failed for pattern:", pattern, "\n")
+  }
+}
+
+cat("\nProcessing complete. Results saved to:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+```
+
+#the first maps created were tilted therefore we made this other code
+#non-tilted view for aesthetic reasons, we can create maps with a custom orientation. #function to produce non-tilted maps:
+
+```{r}
+
+# Create output folder for the combined climate and MSP analysis
+combined_climate_MSP_output_folder_viridis_2025 <- here("output_data", "Climate_MSP_Constraints_2025")
+dir.create(combined_climate_MSP_output_folder_viridis_2025, recursive = TRUE, showWarnings = FALSE)
+
+# Print the output folder path
+cat("Results will be saved to:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+
+#--------------------------------------------------------------------------
+# Check versions of packages for diagnostics
+#--------------------------------------------------------------------------
+cat("Package versions:\n")
+# Use a safer approach to display package versions
+cat("terra version:", as.character(packageVersion("terra")), "\n")
+cat("sf version:", as.character(packageVersion("sf")), "\n")
+
+#--------------------------------------------------------------------------
+# Locate the climate raster files to process
+#--------------------------------------------------------------------------
+
+# Path to the climate projection files
+climate_files_path <- here("output_data", "Combined_results", "ESM_agreement")
+
+# Get all raster files in that directory
+raster_files <- list.files(
+  path = climate_files_path,
+  pattern = "\\.tif$",
+  full.names = TRUE
+)
+
+# Check if files were found
+if(length(raster_files) == 0) {
+  stop("No raster files found in: ", climate_files_path)
+} else {
+  cat("Found", length(raster_files), "raster files to process\n")
+}
+
+#--------------------------------------------------------------------------
+#  load Tasmania shapefile - ROI-in case map is not found they will be created despite that
+#--------------------------------------------------------------------------
+use_shapefile <- FALSE
+tassie_shp <- NULL
+
+# Try to find the shapefile in these locations
+possible_paths <- c(
+  here("raw_data", "tassie_shp.gpkg"),
+  here("raw_data", "Tassie_Coast.shp")
+)
+
+cat("Searching for Tasmania shapefile...\n")
+for (path in possible_paths) {
+  cat("Checking:", path, "\n")
+  if (file.exists(path)) {
+    cat("Found shapefile at:", path, "\n")
+    
+    # Try to read the shapefile
+    tryCatch({
+      tassie_shp <- st_read(path, quiet = TRUE)
+      use_shapefile <- TRUE
+      cat("Tasmania shapefile loaded successfully\n")
+      break
+    }, error = function(e) {
+      cat("Error loading shapefile:", conditionMessage(e), "\n")
+    })
+  }
+}
+
+if (!use_shapefile) {
+  cat("WARNING: Tasmania shapefile not found or could not be loaded. Maps will be created without Tasmania outline.\n")
+  cat("Available files in raw_data directory:\n")
+  raw_files <- list.files(here("raw_data"), recursive = TRUE)
+  cat(paste(raw_files, collapse = "\n"), "\n")
+}
+
+#--------------------------------------------------------------------------
+# Load the constraints raster
+#--------------------------------------------------------------------------
+cat("Loading total constraints raster...\n")
+constraints_path <- here("output_data", "Constraints_2024", "total_constraints.tif")
+
+if(file.exists(constraints_path)) {
+  total_constraints <- rast(constraints_path)
+  cat("Constraints raster loaded successfully\n")
+} else {
+  stop("Total constraints raster not found at: ", constraints_path)
+}
+
+#--------------------------------------------------------------------------
+# Define a minimal processing function that just creates the data files
+#--------------------------------------------------------------------------
+
+process_climate_constraints_minimal <- function(climate_raster_path, constraint_raster, output_folder, pattern) {
+  tryCatch({
+    # Print which file is being processed
+    cat("Processing file:", basename(climate_raster_path), "\n")
+    
+    # Read the climate raster
+    climate_raster <- rast(climate_raster_path)
+    cat("Climate raster loaded successfully\n")
+    
+    # Extract information from filename
+    file_name <- basename(climate_raster_path)
+    parts <- unlist(strsplit(file_name, "_"))
+    ssp <- parts[1]  # SSP scenario
+    decade_range <- paste(parts[2], parts[3], sep = "_")  # Time period
+    
+    # Create output folder for this pattern
+    pattern_folder <- file.path(output_folder, pattern)
+    dir.create(pattern_folder, recursive = TRUE, showWarnings = FALSE)
+    
+    # Define output files
+    raster_output_file <- file.path(pattern_folder, 
+                                  paste0("combined_MSP_climate_", ssp, "_", 
+                                        decade_range, "_", pattern, ".tif"))
+    
+    # Ensure climate raster is in Albers projection for analysis
+    if(crs(climate_raster) != "EPSG:3577") {
+      cat("Reprojecting climate raster to Albers...\n")
+      climate_raster <- project(climate_raster, "EPSG:3577")
+    }
+    
+    # Make sure constraint raster is also in Albers
+    if(crs(constraint_raster) != "EPSG:3577") {
+      cat("Reprojecting constraint raster to Albers...\n")
+      constraint_raster <- project(constraint_raster, "EPSG:3577")
+    }
+    
+    # Step 1: Align and multiply rasters
+    cat("Aligning constraint raster with climate raster...\n")
+    constraint_aligned <- resample(constraint_raster, climate_raster)
+    
+    cat("Creating combined analysis raster...\n")
+    combined_analysis <- climate_raster * constraint_aligned
+    
+    # Step 2: Save the analysis raster
+    cat("Saving combined analysis raster to:", raster_output_file, "\n")
+    writeRaster(combined_analysis, filename = raster_output_file, overwrite = TRUE)
+    
+    # Skip visualization for now to ensure we at least get the data files
+    cat("Successfully created combined analysis raster\n")
+    return(TRUE)
+    
+  }, error = function(e) {
+    cat("ERROR processing file:", basename(climate_raster_path), "\n")
+    cat("Error message:", conditionMessage(e), "\n")
+    return(FALSE)
+  })
+}
+
+#--------------------------------------------------------------------------
+# Process All Files - minimal approach to ensure we get the data
+#--------------------------------------------------------------------------
+
+# Define which patterns to process
+patterns <- c("optimal", "suitable")
+
+# Process each pattern separately
+for(pattern in patterns) {
+  # Get files for current pattern
+  pattern_files <- raster_files[grep(pattern, raster_files)]
+  
+  # Check if any files match the pattern
+  if(length(pattern_files) == 0) {
+    cat("No files found matching pattern:", pattern, "\n")
+    next
+  }
+  
+  cat("\nFound", length(pattern_files), "files for pattern:", pattern, "\n")
+  
+  # Process all files for this pattern
+  successful_files <- 0
+  failed_files <- 0
+  
+  for(i in seq_along(pattern_files)) {
+    file <- pattern_files[i]
+    cat("\nProcessing file", i, "of", length(pattern_files), ":", basename(file), "\n")
+    
+    # Process the file - just create the data raster
+    result <- process_climate_constraints_minimal(
+      file, 
+      total_constraints,
+      combined_climate_MSP_output_folder_viridis_2025,
+      pattern
+    )
+    
+    # Track success/failure
+    if(result) {
+      successful_files <- successful_files + 1
+    } else {
+      failed_files <- failed_files + 1
+    }
+    
+    # Add a brief pause between files
+    Sys.sleep(1)
+    
+    # Explicitly run garbage collection to free memory
+    gc()
+  }
+  
+  cat("\nPattern:", pattern, "- Successfully processed:", successful_files, "files, Failed:", failed_files, "files\n")
+}
+
+cat("\nData processing complete. Results saved to:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+
+# Print a summary of what was created
+pattern_folders <- list.dirs(combined_climate_MSP_output_folder_viridis_2025, recursive = FALSE, full.names = FALSE)
+if(length(pattern_folders) > 0) {
+  for(folder_name in pattern_folders) {
+    folder_path <- file.path(combined_climate_MSP_output_folder_viridis_2025, folder_name)
+    tif_files <- list.files(folder_path, pattern = "\\.tif$")
+    
+    cat("\nPattern:", folder_name)
+    cat("\n  Raster files created:", length(tif_files), "\n")
+  }
+} else {
+  cat("\nNo pattern folders were created. Check for errors in the processing.\n")
+}
+
+cat("\nTo create visualization maps, we can run a separate script after the data files are generated.\n")
+```
+
+#making composite maps of climate projections and constraints
+```{r}
+
+
+# Create output folders
+combined_climate_MSP_output_folder_viridis_2025 <- here("output_data", "Climate_MSP_Constraints_2025")
+composite_maps_folder_viridis <- here("output_data", "Climate_MSP_Constraints_NonTilted_2025", "Composite_Maps")
+
+dir.create(combined_climate_MSP_output_folder_viridis_2025, recursive = TRUE, showWarnings = FALSE)
+dir.create(composite_maps_folder_viridis, recursive = TRUE, showWarnings = FALSE)
+
+# Print the output folder path
+cat("Results will be saved to:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+cat("Composite maps will be saved to:", composite_maps_folder_viridis, "\n")
+
+#--------------------------------------------------------------------------
+# Locate the climate raster files to process
+#--------------------------------------------------------------------------
+
+# Path to the climate projection files
+climate_files_path <- here("output_data", "Combined_results", "ESM_agreement")
+
+# Get all raster files in that directory
+raster_files <- list.files(
+  path = climate_files_path,
+  pattern = "\\.tif$",
+  full.names = TRUE
+)
+
+# Check if files were found
+if(length(raster_files) == 0) {
+  stop("No raster files found in: ", climate_files_path)
+} else {
+  cat("Found", length(raster_files), "raster files to process\n")
+}
+
+#--------------------------------------------------------------------------
+# Try to load Tasmania shapefile - but continue without it if not found
+#--------------------------------------------------------------------------
+use_shapefile <- FALSE
+tassie_shp <- NULL
+
+# Try to find the shapefile in various locations
+possible_paths <- c(
+  here("raw_data", "tassie_shp.gpkg"),
+  here("raw_data", "Tassie_Coast.shp")
+)
+
+cat("Searching for Tasmania shapefile...\n")
+for (path in possible_paths) {
+  cat("Checking:", path, "\n")
+  if (file.exists(path)) {
+    cat("Found shapefile at:", path, "\n")
+    
+    # Try to read the shapefile
+    tryCatch({
+      tassie_shp <- st_read(path, quiet = TRUE)
+      use_shapefile <- TRUE
+      cat("Tasmania shapefile loaded successfully\n")
+      break
+    }, error = function(e) {
+      cat("Error loading shapefile:", conditionMessage(e), "\n")
+    })
+  }
+}
+
+if (!use_shapefile) {
+  cat("WARNING: Tasmania shapefile not found or could not be loaded. Maps will be created without Tasmania outline.\n")
+}
+
+#--------------------------------------------------------------------------
+# Load the constraints raster
+#--------------------------------------------------------------------------
+cat("Loading total constraints raster...\n")
+constraints_path <- here("output_data", "Constraints_2024", "total_constraints.tif")
+
+if(file.exists(constraints_path)) {
+  total_constraints <- rast(constraints_path)
+  cat("Constraints raster loaded successfully\n")
+} else {
+  stop("Total constraints raster not found at: ", constraints_path)
+}
+
+#--------------------------------------------------------------------------
+# Define the processing function that creates non-tilted data and maps
+#--------------------------------------------------------------------------
+
+process_climate_constraints_with_maps <- function(climate_raster_path, constraint_raster, output_folder, pattern) {
+  tryCatch({
+    # Print which file is being processed
+    cat("Processing file:", basename(climate_raster_path), "\n")
+    
+    # Read the climate raster
+    climate_raster <- rast(climate_raster_path)
+    cat("Climate raster loaded successfully\n")
+    
+    # Extract information from filename
+    file_name <- basename(climate_raster_path)
+    parts <- unlist(strsplit(file_name, "_"))
+    ssp <- parts[1]  # SSP scenario
+    decade_range <- paste(parts[2], parts[3], sep = "_")  # Time period
+    
+    # Create output folder for this pattern
+    pattern_folder <- file.path(output_folder, pattern)
+    dir.create(pattern_folder, recursive = TRUE, showWarnings = FALSE)
+    
+    # Define output files
+    raster_output_file <- file.path(pattern_folder, 
+                                  paste0("combined_MSP_climate_", ssp, "_", 
+                                        decade_range, "_", pattern, ".tif"))
+    map_output_file <- file.path(pattern_folder,
+                               paste0("combined_MSP_climate_map_viridis_", ssp, "_",
+                                     decade_range, "_", pattern, ".png"))
+    
+    # Ensure climate raster is in Albers projection for analysis
+    if(crs(climate_raster) != "EPSG:3577") {
+      cat("Reprojecting climate raster to Albers...\n")
+      climate_raster <- project(climate_raster, "EPSG:3577")
+    }
+    
+    # Make sure constraint raster is also in Albers
+    if(crs(constraint_raster) != "EPSG:3577") {
+      cat("Reprojecting constraint raster to Albers...\n")
+      constraint_raster <- project(constraint_raster, "EPSG:3577")
+    }
+    
+    # Step 1: Align and multiply rasters
+    cat("Aligning constraint raster with climate raster...\n")
+    constraint_aligned <- resample(constraint_raster, climate_raster)
+    
+    cat("Creating combined analysis raster...\n")
+    combined_analysis <- climate_raster * constraint_aligned
+    
+    # Step 2: Save the analysis raster
+    cat("Saving combined analysis raster to:", raster_output_file, "\n")
+    writeRaster(combined_analysis, filename = raster_output_file, overwrite = TRUE)
+    
+    # Step 3: Create visualization in WGS84 (non-tilted)
+    cat("Creating visualization in WGS84...\n")
+    
+    # Project both rasters to WGS84 for mapping
+    climate_wgs84 <- project(climate_raster, "EPSG:4326")
+    constraint_wgs84 <- project(constraint_aligned, "EPSG:4326")
+    
+    # Get raster data for ggplot
+    climate_df <- as.data.frame(climate_wgs84, xy = TRUE)
+    colnames(climate_df)[3] <- "value"
+    
+    constraint_df <- as.data.frame(constraint_wgs84, xy = TRUE)
+    colnames(constraint_df)[3] <- "value"
+    
+    # Define bounding box for Tasmania region
+    bbox <- c(140, -45, 155, -39)
+    
+    # Create a ggplot map
+    p <- ggplot() +
+      # Add climate layer
+      geom_raster(data = climate_df, 
+                  aes(x = x, y = y, fill = factor(value))) +
+      # Add constraint layer
+      geom_raster(data = constraint_df %>% filter(value == 0), 
+            aes(x = x, y = y), 
+            fill = "grey80", alpha = 1) +
+      # Add Tasmania outline if available
+      {if (use_shapefile) geom_sf(
+  data = st_transform(tassie_shp, "EPSG:4326"),
+  color = "#373737",  # border color
+  fill = "white",      # interior fill
+  size = 0.3
+)} +
+      # Set color scheme
+      scale_fill_manual(
+        values = c("0" = "#fcd225", "1" = "#c03a83", "2" = "#8606a6", "3" = "#0d0887", "NA" = NA),
+        labels = c("No Analogue", "Low Confidence", "Medium Confidence", "High Confidence"),
+        name = "Climate Viability"
+      ) +
+      # Set coordinate system and limits
+      coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+      theme_void() +  # Use theme_void() instead of theme_map()
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
+    legend.position = "none",
+    plot.margin = margin(0.5, 0.5, 0.5, 0.5, "pt"),  # Minimal margins
+    axis.title = element_blank(),  # Remove axis titles
+    axis.text = element_blank(),   # Remove axis text
+    axis.ticks = element_blank()   # Remove axis ticks
+  )
+    
+    # Save the individual map
+    ggsave(map_output_file, p, width = 4, height = 4, dpi = 300)
+    
+    cat("Successfully created map:", map_output_file, "\n")
+    
+    # Return information about this map for the composite
+    return(list(
+      path = map_output_file,
+      ssp = ssp,
+      decade = decade_range,
+      pattern = pattern,
+      plot = p
+    ))
+    
+  }, error = function(e) {
+    cat("ERROR processing file:", basename(climate_raster_path), "\n")
+    cat("Error message:", conditionMessage(e), "\n")
+    return(NULL)
+  })
+}
+
+#--------------------------------------------------------------------------
+# Process All Files - creating data and maps
+#--------------------------------------------------------------------------
+
+# Define which patterns to process
+patterns <- c("optimal", "suitable")
+
+# Storage for map information
+all_maps <- list()
+
+# Process each pattern separately
+for(pattern in patterns) {
+  # Get files for current pattern
+  pattern_files <- raster_files[grep(pattern, raster_files)]
+  
+  # Check if any files match the pattern
+  if(length(pattern_files) == 0) {
+    cat("No files found matching pattern:", pattern, "\n")
+    next
+  }
+  
+  cat("\nFound", length(pattern_files), "files for pattern:", pattern, "\n")
+  
+  # Create storage for this pattern's maps
+  pattern_maps <- list()
+  
+  # Process all files for this pattern
+  for(i in seq_along(pattern_files)) {
+    file <- pattern_files[i]
+    cat("\nProcessing file", i, "of", length(pattern_files), ":", basename(file), "\n")
+    
+    # Process the file and get map info
+    map_info <- process_climate_constraints_with_maps(
+      file, 
+      total_constraints,
+      combined_climate_MSP_output_folder_viridis_2025,
+      pattern
+    )
+    
+    # Store map info if successful
+    if(!is.null(map_info)) {
+      pattern_maps[[length(pattern_maps) + 1]] <- map_info
+    }
+    
+    # Add a brief pause between files and clear memory
+    Sys.sleep(0.5)
+    gc()
+  }
+  
+  # Store all maps for this pattern
+  all_maps[[pattern]] <- pattern_maps
+  
+  cat("\nCompleted processing for pattern:", pattern, "\n")
+}
+
+cat("\nAll individual maps and data created. Now generating composite maps...\n")
+
+#--------------------------------------------------------------------------
+# Create composite maps for each pattern
+#--------------------------------------------------------------------------
+
+# Extract available decades and SSPs
+decades <- unique(sapply(unlist(all_maps, recursive = FALSE), function(x) x$decade))
+ssps <- unique(sapply(unlist(all_maps, recursive = FALSE), function(x) x$ssp))
+
+# Order them
+decades <- sort(decades)
+ssps <- sort(ssps)
+
+cat("Available decades:", paste(decades, collapse=", "), "\n")
+cat("Available SSPs:", paste(ssps, collapse=", "), "\n")
+
+# Create composite maps for each pattern
+for(pattern in patterns) {
+  cat("\nCreating composite map for pattern:", pattern, "\n")
+  
+  pattern_maps <- all_maps[[pattern]]
+  
+  if(length(pattern_maps) == 0) {
+    cat("No maps available for pattern:", pattern, "\n")
+    next
+  }
+  
+  # Create a dataframe to make it easier to work with
+  map_df <- data.frame(
+    path = sapply(pattern_maps, function(x) x$path),
+    ssp = sapply(pattern_maps, function(x) x$ssp),
+    decade = sapply(pattern_maps, function(x) x$decade),
+    stringsAsFactors = FALSE
+  )
+  
+  # Convert SSP and decade to factors with correct order
+  map_df$ssp <- factor(map_df$ssp, levels = ssps)
+  map_df$decade <- factor(map_df$decade, levels = decades)
+  
+  # Load all PNG files
+  plot_list <- list()
+  
+  for(i in 1:nrow(map_df)) {
+    plot_list[[i]] <- pattern_maps[[i]]$plot +
+      labs(title = paste0(map_df$ssp[i], " - ", map_df$decade[i]))
+  }
+  
+  
+  # Create legend (for the composite map) - updated to show grey80 for constraints
+legend_plot <- ggplot() +
+  # Create dummy data for legend including constrained areas
+  geom_point(data = data.frame(
+    x = c(1:4, 5),
+    y = 1,
+    value = factor(c(0:3, "constrained"))
+  ), aes(x = x, y = y, color = value)) +
+  scale_color_manual(
+    values = c("0" = "#fcd225", "1" = "#c03a83", "2" = "#8606a6", "3" = "#0d0887", "constrained" = "grey80"),
+    labels = c("No Analogue", "Low Confidence", "Medium Confidence", "High Confidence", "Unsuitable"),
+    name = "Climate Suitability"
+  ) +
+    theme_map() +
+    theme(legend.position = "bottom") +
+    guides(color = guide_legend(nrow = 1))
+  
+  # Extract the legend
+  legend <- get_legend(legend_plot)
+  
+  # Calculate grid dimensions
+  n_decades <- length(decades)
+  n_ssps <- length(ssps)
+  
+  # Create an ordered list of plots for the grid
+  ordered_plots <- matrix(list(), nrow = n_ssps, ncol = n_decades)
+  colnames(ordered_plots) <- decades
+  rownames(ordered_plots) <- ssps
+  
+  # Fill in the matrix with plots
+  for(i in 1:nrow(map_df)) {
+    ssp <- as.character(map_df$ssp[i])
+    decade <- as.character(map_df$decade[i])
+    ordered_plots[ssp, decade] <- plot_list[i]
+  }
+  
+  # Flatten the matrix by rows
+  plot_grid <- NULL
+  for(i in 1:n_ssps) {
+    row_plots <- do.call(wrap_plots, c(ordered_plots[i,], ncol = n_decades))
+    if(is.null(plot_grid)) {
+      plot_grid <- row_plots
+    } else {
+      plot_grid <- plot_grid / row_plots
+    }
+  }
+  
+  # Add decade labels at the top
+  decade_labels <- plot_grid(
+    plotlist = lapply(decades, function(d) {
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = d, size = 3) + 
+        theme_map()
+    }),
+    ncol = length(decades)
+  )
+  
+  # Add SSP labels on the left
+  ssp_labels <- plot_grid(
+    plotlist = lapply(ssps, function(s) {
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = s, size = 3, angle = 90) + 
+        theme_map()
+    }),
+    nrow = length(ssps)
+  )
+  
+  # Combine everything
+  final_plot <- plot_grid(
+    decade_labels, 
+    plot_grid(ssp_labels, plot_grid, ncol = 2, rel_widths = c(0.05, 0.95)),
+    legend,
+    ncol = 1,
+    rel_heights = c(0.05, 0.9, 0.05)
+  )
+  
+  # Save the composite map
+  composite_filename <- file.path(composite_maps_folder_viridis, paste0("composite_map_", pattern, ".png"))
+  save_plot(composite_filename, final_plot, base_width = 12, base_height = 8, dpi = 300)
+  
+  cat("Composite map saved to:", composite_filename, "\n")
+  
+  # Also create a simplified version with just the grid of maps
+  ggsave(
+    file.path(composite_maps_folder_viridis, paste0("composite_map_simple_", pattern, ".png")),
+    plot_grid,
+    width = 12, height = 8, dpi = 300
+  )
+}
+
+cat("\nAll processing complete!\n")
+cat("Individual maps and data are saved in:", combined_climate_MSP_output_folder_viridis_2025, "\n")
+cat("Composite maps are saved in:", composite_maps_folder_viridis, "\n")
+```
+
+
+#code adjusted to make a better composite map 11 aug 2025 with ajustments 16oct2025
+# Note: This script will attempt to use magick for image cropping
+# Install if needed: install.packages("magick")
+```{r}
+
+library(png)
+library(grid)
+library(webshot2)
+library(here)
+
+# Define input and output directories
+input_folder <- here("output_data", "Climate_MSP_Constraints_2025")
+output_folder <- here("output_data", "Climate_MSP_Constraints_NonTilted_2025", "Composite_maps")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
+
+# Get all PNG files from both pattern folders
+optimal_folder <- file.path(input_folder, "optimal")
+suitable_folder <- file.path(input_folder, "suitable")
+
+# List all PNG files from both folders
+optimal_files <- if(dir.exists(optimal_folder)) {
+  list.files(optimal_folder, pattern = "\\.png$", full.names = TRUE)
+} else {
+  character(0)
+}
+
+suitable_files <- if(dir.exists(suitable_folder)) {
+  list.files(suitable_folder, pattern = "\\.png$", full.names = TRUE)
+} else {
+  character(0)
+}
+
+# Combine all files
+plot_files <- c(optimal_files, suitable_files)
+
+if (length(plot_files) == 0) {
+  stop("No PNG files found in optimal or suitable folders in ", input_folder)
+}
+
+# Function to format SSP labels properly
+format_ssp_label <- function(ssp_raw) {
+  # Convert from formats like "ssp119" to "SSP1-1.9"
+  ssp_upper <- toupper(ssp_raw)
+  
+  # Handle different SSP formats
+  if (grepl("SSP119", ssp_upper)) return("SSP1-1.9")
+  if (grepl("SSP126", ssp_upper)) return("SSP1-2.6")
+  if (grepl("SSP245", ssp_upper)) return("SSP2-4.5")
+  if (grepl("SSP370", ssp_upper)) return("SSP3-7.0")
+  if (grepl("SSP585", ssp_upper)) return("SSP5-8.5")
+  
+  # Fallback: return as uppercase if no match
+  return(ssp_upper)
+}
+
+# Function to format decade labels properly
+format_decade_label <- function(decade_raw) {
+  # Convert from formats like "2021_2030" to "2021-2030"
+  if (grepl("_", decade_raw)) {
+    parts <- strsplit(decade_raw, "_")[[1]]
+    if (length(parts) == 2) {
+      start_year <- parts[1]
+      end_year <- parts[2]
+      return(paste0(start_year, "-", end_year))
+    }
+  }
+  
+  # Fallback: return original if can't parse
+  return(decade_raw)
+}
+
+# Extract metadata from filenames
+extract_metadata <- function(filename) {
+  basename_file <- basename(filename)
+  
+  # Determine pattern from the folder path
+  if (grepl("/optimal/", filename)) {
+    pattern <- "optimal"
+  } else if (grepl("/suitable/", filename)) {
+    pattern <- "suitable"
+  } else {
+    pattern <- "unknown"
+  }
+  
+  # Extract SSP and decade from filename
+  # Assuming format like: optimal_ssp119_2021_2030.png or similar
+  parts <- strsplit(basename_file, "_")[[1]]
+  
+  # Remove .png extension from last part
+  last_part <- parts[length(parts)]
+  parts[length(parts)] <- sub("\\.png$", "", last_part)
+  
+  # Try to identify SSP and decade parts
+  ssp_raw <- NA
+  decade_range <- NA
+  
+  # Look for SSP pattern
+  for(i in 1:length(parts)) {
+    if(grepl("^ssp[0-9]+$", parts[i], ignore.case = TRUE)) {
+      ssp_raw <- parts[i]
+      # Try to find decade parts after SSP
+      if(i + 2 <= length(parts) && 
+         grepl("^[0-9]{4}$", parts[i+1]) && 
+         grepl("^[0-9]{4}$", parts[i+2])) {
+        decade_range <- paste(parts[i+1], parts[i+2], sep="_")
+      }
+      break
+    }
+  }
+  
+  return(list(
+    ssp = ssp_raw,
+    ssp_formatted = if(!is.na(ssp_raw)) format_ssp_label(ssp_raw) else NA,
+    decade = decade_range,
+    decade_formatted = if(!is.na(decade_range)) format_decade_label(decade_range) else NA,
+    pattern = pattern,
+    path = filename
+  ))
+}
+
+# Get metadata for all files
+all_metadata <- lapply(plot_files, extract_metadata)
+
+# Get unique patterns, SSPs, and decades (using raw values for processing)
+patterns <- unique(sapply(all_metadata, function(x) x$pattern))
+ssps <- unique(sapply(all_metadata, function(x) x$ssp))
+decades <- unique(sapply(all_metadata, function(x) x$decade))
+
+# Ensure they are character vectors (atomic)
+patterns <- as.character(patterns)
+ssps <- as.character(ssps)
+decades <- as.character(decades)
+
+# Remove any NA values
+patterns <- patterns[!is.na(patterns)]
+ssps <- ssps[!is.na(ssps)]
+decades <- decades[!is.na(decades)]
+
+# Sort them
+ssps <- sort(ssps)
+decades <- sort(decades)
+patterns <- sort(patterns)
+
+# Create formatted versions for display
+ssps_formatted <- sapply(ssps, function(x) format_ssp_label(x))
+decades_formatted <- sapply(decades, function(x) format_decade_label(x))
+
+# Create proper mapping for sorted display
+ssp_mapping <- setNames(ssps_formatted, ssps)
+decade_mapping <- setNames(decades_formatted, decades)
+
+cat("Available decades:", paste(decades, collapse=", "), "\n")
+cat("Available SSPs:", paste(ssps, collapse=", "), "\n")
+cat("Formatted decades:", paste(decades_formatted, collapse=", "), "\n")
+cat("Formatted SSPs:", paste(ssps_formatted, collapse=", "), "\n")
+
+# Function to find matching map
+find_map <- function(pattern_metadata, ssp, decade) {
+  for(i in 1:length(pattern_metadata)) {
+    if(pattern_metadata[[i]]$ssp == ssp && 
+       pattern_metadata[[i]]$decade == decade) {
+      return(pattern_metadata[[i]]$path)
+    }
+  }
+  return(NA)
+}
+
+# Create composite maps for each pattern
+for(pattern in patterns) {
+  cat("\nCreating composite map for pattern:", pattern, "\n")
+  
+  # Filter files for this pattern
+  pattern_metadata <- all_metadata[sapply(all_metadata, function(x) x$pattern == pattern)]
+  
+  if(length(pattern_metadata) == 0) {
+    cat("No maps available for pattern:", pattern, "\n")
+    next
+  }
+  
+  # Create individual maps directory with v2 suffix
+  individual_maps_dir <- file.path(output_folder, 
+                                  paste0("individual_maps_", pattern, "_v2"))
+  if(!dir.exists(individual_maps_dir)) {
+    dir.create(individual_maps_dir, recursive = TRUE)
+  }
+  
+  # Save individual maps with cropping
+  for(s in 1:length(ssps)) {
+    for(d in 1:length(decades)) {
+      current_ssp <- ssps[s]
+      current_decade <- decades[d]
+      
+      # Create filename for this map
+      map_filename <- file.path(individual_maps_dir, 
+                               paste0(pattern, "_", current_ssp, "_", current_decade, ".png"))
+      
+      # Find matching map
+      map_path <- find_map(pattern_metadata, current_ssp, current_decade)
+      
+      if(!is.na(map_path) && file.exists(map_path)) {
+        
+        # Read, crop (to remove borders and keep only map), and save the image
+        tryCatch({
+          library(magick)
+          img <- image_read(map_path)
+          
+          # Get image dimensions
+          info <- image_info(img)
+          width <- info$width
+          height <- info$height
+          
+          # Crop to remove borders AND TITLES from all sides
+          # Remove borders: left 15%, right 15%, top 20% (to remove title), bottom 5%
+          crop_left <- floor(width * 0.15)     # Start 15% from left
+          crop_top <- floor(height * 0.20)     # Start 20% from top (to remove title)
+          crop_width <- floor(width * 0.70)    # Keep 70% of width (15% + 70% = 85%, removing 15% from right)
+          crop_height <- floor(height * 0.75)  # Keep 75% of height (20% + 75% = 95%, removing 5% from bottom)
+          
+          # Crop: geometry format is "WIDTHxHEIGHT+X_OFFSET+Y_OFFSET"
+          crop_geometry <- paste0(crop_width, "x", crop_height, "+", crop_left, "+", crop_top)
+          cropped_img <- image_crop(img, crop_geometry)
+          
+          # Save cropped image
+          image_write(cropped_img, map_filename)
+          
+        }, error = function(e) {
+          # If magick fails, just copy the original file
+          cat("Warning: Could not crop image", map_path, ". Using original.\n")
+          cat("Error:", e$message, "\n")
+          file.copy(map_path, map_filename, overwrite = TRUE)
+        })
+        
+      } else {
+        # Create a blank image
+        png(map_filename, width = 300, height = 300)
+        plot.new()
+        box("figure", col = "lightgrey")
+        dev.off()
+      }
+    }
+  }
+  
+  # Create an ultra-clean HTML table for viewing with v2 suffix
+  html_file <- file.path(output_folder, 
+                        paste0("composite_map_", pattern, "_minimal_v2.html"))
+  
+  html_content <- c(
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head>",
+    paste0("<title>", pattern, " Climate Analogues</title>"),
+    "<style>",
+    "* { margin: 0; padding: 0; box-sizing: border-box; }",
+    "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; padding: 15px; }",
+    ".container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }",
+    ".header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; }",
+    ".title { font-size: 28px; font-weight: 600; margin-bottom: 5px; }",
+    ".subtitle { font-size: 14px; opacity: 0.9; }",
+    ".grid-container { display: grid; padding: 0; gap: 2px; background: #e9ecef; border-spacing: 2px; }",
+    paste0(".grid-container { grid-template-columns: 80px repeat(", length(decades), ", 1fr); }"),
+    ".grid-header { background: #495057; color: white; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; padding: 12px 8px; }",
+    ".grid-cell { background: white; position: relative; padding: 2px; border: 1px solid #eee; }",
+    ".grid-cell::after { content: ''; display: block; padding-bottom: 75%; /* Maintain aspect ratio */ }",
+    ".grid-cell img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }",
+    ".row-header { background: #6c757d; color: white; font-weight: 600; font-size: 12px; writing-mode: horizontal-tb; display: flex; align-items: center; justify-content: center; padding: 8px; }",
+    ".legend { padding: 20px; background: #f8f9fa; border-top: 1px solid #dee2e6; }",
+    ".legend-title { font-weight: 600; margin-bottom: 10px; color: #495057; font-size: 14px; }",
+    ".legend-items { display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; }",
+    ".legend-item { display: flex; align-items: center; font-size: 16px; }",
+    ".legend-color { width: 18px; height: 18px; border-radius: 3px; margin-right: 6px; border: 1px solid rgba(0,0,0,0.1); }",
+    "@media (max-width: 768px) { .grid-container { grid-template-columns: 60px repeat(", length(decades), ", 1fr); } .title { font-size: 20px; } }",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<div class='container'>",
+    "<div class='grid-container'>"
+  )
+  
+  # Add headers row with formatted decade labels
+  html_content <- c(html_content, "<div class='grid-header'></div>") # Empty corner
+  for(d in 1:length(decades)) {
+    formatted_decade <- decade_mapping[decades[d]]
+    html_content <- c(html_content, paste0("<div class='grid-header'>", formatted_decade, "</div>"))
+  }
+  
+  # Add data rows with formatted SSP labels
+  for(s in 1:length(ssps)) {
+    current_ssp <- ssps[s]
+    formatted_ssp <- ssp_mapping[current_ssp]
+    html_content <- c(html_content, paste0("<div class='row-header'>", formatted_ssp, "</div>"))
+    
+    for(d in 1:length(decades)) {
+      current_decade <- decades[d]
+      # Updated path to use v2 folder
+      img_path <- paste0("individual_maps_", pattern, "_v2/", 
+                        pattern, "_", current_ssp, "_", current_decade, ".png")
+      formatted_decade <- decade_mapping[current_decade]
+      html_content <- c(html_content, paste0("<div class='grid-cell'><img src='", img_path, 
+                                          "' alt='", formatted_ssp, " - ", formatted_decade, "'></div>"))
+    }
+  }
+  
+  # Close grid and add legend
+  # Fixed HTML generation section - replace the problematic legend part
+
+# Close grid and add legend - 
+html_content <- c(
+  html_content,
+  "</div>",
+  "<div class='legend'>",
+  "<div class='legend-title'>  Confidence level(Agreement among ESMs) </div>",
+  "<div class='legend-items'>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #E5E5E5;'></div>Constrained areas</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #fcd225;'></div>No analogue (&lt;25%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #c03a83;'></div>Low confidence (≥25% to &lt;50%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #8606a6;'></div>Medium confidence(≥50% to &lt;75%)</div>",
+  "<div class='legend-item'><div class='legend-color' style='background-color: #0d0887;'></div>High confidence (≥75%)</div>",
+  "</div>",
+  "</div>",
+  "</div>",
+  "</body>",
+  "</html>"
+)
+
+# Write the HTML file
+writeLines(html_content, html_file)
+cat("Minimal HTML view saved to:", html_file, "\n")
+  
+  
+  # Create high-quality PNG composite using base R with minimal spacing
+  output_file <- file.path(output_folder, 
+                          paste0("composite_map_", pattern, "_tight_v2.png"))
+  
+  # Write the HTML file
+writeLines(html_content, html_file)
+cat("Minimal HTML view saved to:", html_file, "\n")
+
+# Convert HTML to PNG
+png_output_file <- file.path(output_folder, 
+                            paste0("composite_map_", pattern, "_minimal_v2.png"))
+
+if(require(webshot2, quietly = TRUE)) {
+  webshot2::webshot(
+    url = html_file,
+    file = png_output_file,
+    vwidth = 1400,
+    vheight = 1000,
+    zoom = 2,
+    delay = 2,
+    cliprect = "viewport"
+  )
+  cat("HTML converted to PNG:", png_output_file, "\n")
+} else {
+  cat("webshot2 not available. Install with: install.packages('webshot2')\n")
+}
+  
+  # Calculate dimensions
+  n_ssps <- length(ssps)
+  n_decades <- length(decades)
+  
+  # Create high-resolution PNG
+  png(output_file, width = n_decades * 4 + 1.5, height = n_ssps * 3 + 2, 
+      units = "in", res = 300, bg = "white")
+  
+  # Set up minimal margins and tight layout
+  par(mar = c(0.5, 1, 1.5, 0.1), oma = c(0, 0, 0, 0))
+  
+  # Create plotting area
+  plot.new()
+  plot.window(xlim = c(0, n_decades + 0.8), ylim = c(0, n_ssps + 0.3))
+  
+  # Add title at the top
+  text(x = (n_decades + 0.8)/2, y = n_ssps + 0.15, 
+       labels = paste(toupper(substr(pattern, 1, 1)), 
+                    substr(pattern, 2, nchar(pattern)), 
+                    "Climate Analogues"),
+       cex = 1.4, font = 2, col = "#2c3e50")
+  
+  # Add decade headers with formatted labels and minimal spacing
+  for(d in 1:n_decades) {
+    formatted_decade <- decade_mapping[decades[d]]
+    text(x = d - 0.1, y = n_ssps - 0.05, labels = formatted_decade, 
+         cex = 0.9, font = 2, col = "#34495e")
+  }
+  
+  # Add formatted SSP labels on the left with minimal spacing
+  for(s in 1:n_ssps) {
+    formatted_ssp <- ssp_mapping[ssps[s]]
+    text(x = -0.15, y = n_ssps - s + 0.5, labels = formatted_ssp, 
+         cex = 0.9, font = 2, srt = 0, col = "#34495e")
+  }
+  
+  # Draw maps with minimal gaps
+  for(s in 1:n_ssps) {
+    for(d in 1:n_decades) {
+      # Tight cell boundaries - much smaller gaps
+      x_min <- d - 0.48
+      x_max <- d + 0.48
+      y_min <- n_ssps - s + 0.02
+      y_max <- n_ssps - s + 0.98
+      
+      # Add subtle border
+      rect(x_min, y_min, x_max, y_max, border = "#bdc3c7", lwd = 0.3)
+      
+      # Load and display image
+      current_ssp <- ssps[s]
+      current_decade <- decades[d]
+      map_path <- find_map(pattern_metadata, current_ssp, current_decade)
+      
+      if(!is.na(map_path) && file.exists(map_path)) {
+        
+        tryCatch({
+          img <- png::readPNG(map_path)
+          rasterImage(img, x_min, y_min, x_max, y_max)
+        }, error = function(e) {
+          # Draw placeholder for missing images
+          rect(x_min, y_min, x_max, y_max, col = "#ecf0f1", border = "#bdc3c7")
+          text((x_min + x_max)/2, (y_min + y_max)/2, "No Data", 
+               cex = 0.7, col = "#7f8c8d")
+        })
+      } else {
+        # Draw placeholder
+        rect(x_min, y_min, x_max, y_max, col = "#ecf0f1", border = "#bdc3c7")
+        text((x_min + x_max)/2, (y_min + y_max)/2, "No Data", 
+             cex = 0.7, col = "#7f8c8d")
+      }
+    }
+  }
+  
+  dev.off()
+  
+  cat("Tight grid PNG saved to:", output_file, "\n")
+}
+
+cat("\nAll processing complete!\n")
+cat("Clean composites saved in:", output_folder, "\n")
+
+```
+
+# Go to code 16_km2_area_climate_and_constraints_plots_EF_Oct25
+
+

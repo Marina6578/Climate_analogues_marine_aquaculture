@@ -1,0 +1,795 @@
+---
+title: "20_plots_paper_constrained_by_territory_EF_Oct25"
+date: 1st version "2025-07-08" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+
+```{r}
+# Read the data
+data <- read_csv(here("output_data/Climate_MSP_Analysis_2024_Corrected/constraint_impact_analysis/constraint_impact_on_analogues.csv"))
+```
+
+
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read the data
+data <- read_csv(here("output_data/Climate_MSP_Analysis_2024_Corrected/constraint_impact_analysis/constraint_impact_on_analogues.csv"))
+
+# Data preparation
+plot_data <- data %>%
+  # Clean up marine zone names for better display
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate free area (High_Confidence - constraints)
+    Free_Area_km2 = High_Confidence_km2 - Constraint_Area_km2
+  ) %>%
+  # Filter to only include the high confidence areas 
+  select(SSP_clean, Year, Pattern, Marine_Zone, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create the plot
+p <- ggplot(plot_data, aes(x = Year)) +
+  # Add ribbon showing constraint area (gray background) - only where constraints exist
+  geom_ribbon(aes(ymin = 0, ymax = Constraint_Area_km2), 
+              fill = "gray80", alpha = 0.7, 
+              data = plot_data %>% 
+                filter(Pattern == "suitable", Constraint_Area_km2 > 0)) +  # Only show where constraints > 0
+  
+  # Add lines for free area - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "red", 
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Add text annotation for current usage line
+  annotate("text", x = 2030, y = current_usage * 1.5, 
+           label = paste0("Current usage: ", current_usage, " km²"), 
+           color = "red", size = 3, hjust = 0) +
+  
+  # Facet by marine zone
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "pattern",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using viridis (colorblind-friendly)
+  scale_color_viridis_d(name = "SSP Scenario", option = "D") +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Free Area Available After Constraints",
+    subtitle = paste0("Gray area = Constraints; Red dotted line = Current usage (", current_usage, " km²)"),
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plot
+print(p)
+
+# Save the plot
+ggsave(here("output_data", "Climate_MSP_Analysis_2024", "climate_analogues_constraints_plot.png"), 
+       plot = p, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+# Optional: Print constraint data to check the High Seas issue
+print("Constraint data check:")
+constraint_check <- plot_data %>%
+  filter(Year == 2025, Pattern == "suitable") %>%
+  select(Marine_Zone, Constraint_Area_km2, High_Confidence_km2, Free_Area_km2) %>%
+  mutate(Constraint_Percentage = round((Constraint_Area_km2 / (High_Confidence_km2 + Constraint_Area_km2)) * 100, 1))
+
+print(constraint_check)
+```
+#Graphs using constraint_impact_on_analogues in the folder "output_data/Climate_MSP_Analysis_2024/constraint_impact_analysis/constraint_impact_on_analogues.csv"))
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read the data
+data <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv"))
+
+# Data preparation
+plot_data <- data %>%
+  # Clean up marine zone names for better display
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate free area (High_Confidence - constraints)
+    Free_Area_km2 = High_Confidence_km2 - Constraint_Area_km2,
+    # Calculate the top of constraint area for ribbon
+    Constraint_Top = Constraint_Area_km2
+  ) %>%
+  # Filter to only include the high confidence areas 
+  select(SSP_clean, Year, Pattern, Marine_Zone, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2, Constraint_Top)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create the plot
+p <- ggplot(plot_data, aes(x = Year)) +
+  # Add horizontal line showing constraint level (constant across time)
+  geom_hline(aes(yintercept = Constraint_Area_km2), 
+             color = "gray60", 
+             linetype = "solid", 
+             size = 1.2,
+             alpha = 0.8,
+             data = plot_data %>% 
+               filter(Pattern == "suitable") %>%
+               group_by(Marine_Zone) %>%
+               slice(1)) +  # Only show once per marine zone
+  
+  # Add lines for free area - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "red", 
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Facet by marine zone
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "pattern",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using viridis (colorblind-friendly)
+  scale_color_viridis_d(name = "SSP Scenario", option = "D") +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Free Area Available After Constraints",
+    subtitle = paste0("Gray line = Constraint level; Red dotted line = Current usage (", current_usage, " km²)"),
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plot
+print(p)
+
+# Save the plot
+ggsave(here("output_data", "Climate_MSP_Analysis_2024", "climate_analogues_constraints_plot.png"), 
+       plot = p, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+# Optional: Print constraint data to check the High Seas issue
+print("Constraint data check:")
+constraint_check <- plot_data %>%
+  filter(Year == 2025, Pattern == "suitable") %>%
+  select(Marine_Zone, Constraint_Area_km2, High_Confidence_km2, Free_Area_km2) %>%
+  mutate(Constraint_Percentage = round((Constraint_Area_km2 / (High_Confidence_km2 + Constraint_Area_km2)) * 100, 1))
+
+print(constraint_check)
+```
+#using data2- file area_results_marine_zones_with_constraints at folder  output_data/Climate_MSP_Analysis_2024
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read both datasets
+data <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv"))
+data2 <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+
+# Let's examine the structure of data2 first
+print("Data2 structure:")
+print(head(data2))
+print("Unique columns in data2:")
+print(colnames(data2))
+
+# Data preparation for data2
+plot_data2 <- data2 %>%
+  # Clean up marine zone names for better display
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate total area and constraint percentage
+    Total_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    # Available area is High_Confidence (this should be the free area after constraints)
+    Free_Area_km2 = High_Confidence_km2,
+    # Constrained area
+    Constraint_Area_km2 = Unsuitable_Constraints_km2
+  ) %>%
+  select(SSP_clean, Year, Pattern, Marine_Zone, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2, Total_Area_km2, Unsuitable_Constraints_km2)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create comparison plots side by side using data2
+p2 <- ggplot(plot_data2, aes(x = Year)) +
+  # Show constraint area as ribbon from 0 to constraint level
+  geom_ribbon(aes(ymin = 0, ymax = Constraint_Area_km2), 
+              fill = "gray80", alpha = 0.7, 
+              data = plot_data2 %>% 
+                filter(Pattern == "suitable") %>%
+                group_by(Marine_Zone, Year) %>%
+                slice(1)) +  # Only show once per year per zone
+  
+  # Add lines for available area (High_Confidence) - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "magenta", 
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Facet by marine zone
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "Pattern",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using viridis (colorblind-friendly)
+  scale_color_viridis_d(name = "SSP Scenario", option = "D") +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Available Area with Constraints (Data2)",
+    subtitle = paste0("Gray area = Constraints; Red dotted line = Current usage (", current_usage, " km²)"),
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the new plot
+print(p2)
+
+# Compare constraint levels between datasets
+print("Constraint comparison between datasets:")
+constraint_comparison <- data2 %>%
+  filter(Decade == "2021_2030", Pattern == "suitable") %>%
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Total_Area = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Constraint_Percent = round((Unsuitable_Constraints_km2 / Total_Area) * 100, 1)
+  ) %>%
+  select(Marine_Zone, Unsuitable_Constraints_km2, High_Confidence_km2, Total_Area, Constraint_Percent)
+
+print(constraint_comparison)
+```
+
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read both datasets
+data <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv"))
+data2 <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+
+# Let's examine the structure of data2 first
+print("Data2 structure:")
+print(head(data2))
+print("Unique columns in data2:")
+print(colnames(data2))
+
+# Data preparation for data2
+plot_data2 <- data2 %>%
+  # Clean up marine zone names for better display
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate total area and constraint percentage
+    Total_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    # Available area is High_Confidence (this should be the free area after constraints)
+    Free_Area_km2 = High_Confidence_km2,
+    # Constrained area
+    Constraint_Area_km2 = Unsuitable_Constraints_km2
+  ) %>%
+  select(SSP_clean, Year, Pattern, Marine_Zone, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2, Total_Area_km2, Unsuitable_Constraints_km2)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create comparison plots side by side using data2
+p2 <- ggplot(plot_data2, aes(x = Year)) +
+  # Show constraint area as ribbon from 0 to constraint level
+  geom_ribbon(aes(ymin = 0, ymax = Constraint_Area_km2), 
+              fill = "gray80", alpha = 0.7, 
+              data = plot_data2 %>% 
+                filter(Pattern == "suitable") %>%
+                group_by(Marine_Zone, Year) %>%
+                slice(1)) +  # Only show once per year per zone
+  
+  # Add lines for available area (High_Confidence) - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "#E7298A", # Magenta from colorbrewer (colorblind-friendly)
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Create a dummy data point for the current usage line to appear in legend
+  geom_point(aes(y = current_usage, color = "Current Usage"), 
+             x = -Inf, size = 0, alpha = 0) + # Invisible point just for legend
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Facet by marine zone
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "Pattern",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using viridis (colorblind-friendly) + current usage
+  scale_color_manual(values = c("SSP1-1.9" = "#440154FF", 
+                               "SSP1-2.6" = "#31688EFF",
+                               "SSP2-4.5" = "#35B779FF", 
+                               "SSP3-7.0" = "#FDE725FF",
+                               "SSP5-8.5" = "#FFFFFF",  # Will be overridden by viridis
+                               "Current Usage" = "#E7298A"),
+                    name = "SSP Scenario") +
+  # Override with viridis for SSP scenarios only
+  scale_color_viridis_d(name = "SSP Scenario", option = "D",
+                       aesthetics = "color",
+                       guide = guide_legend(override.aes = list(linetype = c(rep("solid", 5), "dotted"),
+                                                               size = c(rep(1, 5), 0.8)))) +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Available Area with Constraints",
+    subtitle = "Gray area = Constraints; Magenta dotted line = Current usage",
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the new plot
+print(p2)
+
+# Compare constraint levels between datasets
+print("Constraint comparison between datasets:")
+constraint_comparison <- data2 %>%
+  filter(Decade == "2021_2030", Pattern == "suitable") %>%
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Total_Area = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Constraint_Percent = round((Unsuitable_Constraints_km2 / Total_Area) * 100, 1)
+  ) %>%
+  select(Marine_Zone, Unsuitable_Constraints_km2, High_Confidence_km2, Total_Area, Constraint_Percent)
+
+# Save both plots in the Figures folder
+ggsave(here("Figures", "climate_analogues_constraints_data2.png"), 
+       plot = p2, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+ggsave(here("Figures", "climate_analogues_constraints_data2.pdf"), 
+       plot = p2, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+print("Plots saved to Figures folder!")
+```
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read both datasets
+data <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "constraint_impact_analysis", "constraint_impact_on_analogues.csv"))
+data2 <- read_csv(here("output_data", "Climate_MSP_Analysis_2024_Corrected", "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+
+# Let's examine the structure of data2 first
+print("Data2 structure:")
+print(head(data2))
+print("Unique columns in data2:")
+print(colnames(data2))
+
+# Data preparation for data2
+plot_data2 <- data2 %>%
+  # Clean up marine zone names for better display
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate total area and constraint percentage
+    Total_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    # Available area is High_Confidence (this should be the free area after constraints)
+    Free_Area_km2 = High_Confidence_km2,
+    # Constrained area
+    Constraint_Area_km2 = Unsuitable_Constraints_km2
+  ) %>%
+  select(SSP_clean, Year, Pattern, Marine_Zone, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2, Total_Area_km2, Unsuitable_Constraints_km2)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create comparison plots side by side using data2
+p2 <- ggplot(plot_data2, aes(x = Year)) +
+  # Show constraint area as ribbon from 0 to constraint level
+  geom_ribbon(aes(ymin = 0, ymax = Constraint_Area_km2), 
+              fill = "gray80", alpha = 0.7, 
+              data = plot_data2 %>% 
+                filter(Pattern == "suitable") %>%
+                group_by(Marine_Zone, Year) %>%
+                slice(1)) +  # Only show once per year per zone
+  
+  # Add lines for available area (High_Confidence) - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "#E7298A", # Magenta from colorbrewer (colorblind-friendly)
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Create a dummy data point for the current usage line to appear in legend
+  geom_point(aes(y = current_usage, color = "Current Usage"), 
+             x = -Inf, size = 0, alpha = 0) + # Invisible point just for legend
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Facet by marine zone
+  facet_wrap(~ Marine_Zone, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "Pattern",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using viridis (colorblind-friendly) + current usage
+  scale_color_manual(values = c("SSP1-1.9" = "#440154FF", 
+                               "SSP1-2.6" = "#31688EFF",
+                               "SSP2-4.5" = "#35B779FF", 
+                               "SSP3-7.0" = "#FDE725FF",
+                               "SSP5-8.5" = "#FFFFFF",  # Will be overridden by viridis
+                               "Current Usage" = "#E7298A"),
+                    name = "SSP Scenario") +
+  # Override with viridis for SSP scenarios only
+  scale_color_viridis_d(name = "SSP Scenario", option = "D",
+                       aesthetics = "color",
+                       guide = guide_legend(override.aes = list(linetype = c(rep("solid", 5), "dotted"),
+                                                               size = c(rep(1, 5), 0.8)))) +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Available Area with Constraints",
+    subtitle = "Gray area = Constraints; Magenta dotted line = Current usage",
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the new plot
+print(p2)
+
+# Compare constraint levels between datasets
+print("Constraint comparison between datasets:")
+constraint_comparison <- data2 %>%
+  filter(Decade == "2021_2030", Pattern == "suitable") %>%
+  mutate(
+    Marine_Zone = case_when(
+      Marine_Zone == "Coastal waters and territorial seas (state waters)" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    Total_Area = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Constraint_Percent = round((Unsuitable_Constraints_km2 / Total_Area) * 100, 1)
+  ) %>%
+  select(Marine_Zone, Unsuitable_Constraints_km2, High_Confidence_km2, Total_Area, Constraint_Percent)
+
+# Save both plots in the Figures folder
+ggsave(here("Figures", "climate_analogues_constraints_data2.png"), 
+       plot = p2, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+ggsave(here("Figures", "climate_analogues_constraints_data2.pdf"), 
+       plot = p2, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+print("Plots saved to Figures folder!")
+```
+#Go to code 21_comparison_before_after_constraints_EF_Oct25

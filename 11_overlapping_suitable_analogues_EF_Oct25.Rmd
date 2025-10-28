@@ -1,0 +1,426 @@
+---
+title: "11_Overlapping Suitable and optimal stress scenarios(17C) with analogues(21.5C)"
+date: 1st version "2025-01-06" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+library(ggplot2)
+library(magick)
+library(reshape2)
+library(viridisLite)
+```
+
+#get all the results of the analogues and overlap with results of stress being (1) suitable and then (2) Optimal stress levels.
+```{r}
+# Required libraries
+library(terra)
+library(here)
+
+# List of SSPs and Patterns
+ssps <- c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")  # SSP scenarios
+patterns <- c("suitable", "optimal")                        # Patterns to combine with "analogue"
+
+# Define folders
+Results_folder <- here("output_data/Results")  # Input folder
+Combined_results_folder <- here("output_data/Combined_Results")  # Output folder
+
+# Create the output folder if it doesn't exist
+if (!dir.exists(Combined_results_folder)) {
+  dir.create(Combined_results_folder, recursive = TRUE)
+}
+
+# Loop through each SSP
+for (ssp in ssps) {
+  
+  # Loop through decades with ranges like 2021_2030
+  for (start_year in seq(2021, 2091, by = 10)) {  # Start years for decades
+    end_year <- start_year + 9
+    decade_range <- paste0(start_year, "_", end_year)  # e.g., "2021_2030"
+    
+    # Load analogue raster
+    analogue_file <- file.path(Results_folder, paste0("analogue_", ssp, "_", decade_range, ".tif"))
+    if (!file.exists(analogue_file)) {
+      print(paste("Missing analogue file:", analogue_file))  # Debug message
+      next  # Skip if analogue file is missing
+    }
+    analogue_raster <- rast(analogue_file)  # Load analogue raster
+    
+    # Process each pattern to combine with "analogue"
+    for (pattern in patterns) {
+      
+      # Load pattern raster
+      pattern_file <- file.path(Results_folder, paste0(pattern, "_", ssp, "_", decade_range, ".tif"))
+      if (!file.exists(pattern_file)) {
+        print(paste("Missing", pattern, "file:", pattern_file))  # Debug message
+        next  # Skip if pattern file is missing
+      }
+      pattern_raster <- rast(pattern_file)  # Load pattern raster
+      
+      # Check raster compatibility
+      if (!compareGeom(analogue_raster, pattern_raster)) {
+        print(paste("Incompatible rasters for:", ssp, decade_range, pattern))  # Debug message
+        next
+      }
+      
+      # Combine the rasters (e.g., sum)
+      combined_raster <- analogue_raster + pattern_raster
+      
+      # Save combined raster
+      output_file <- file.path(Combined_results_folder, paste0(ssp, "_", decade_range, "_analogue_", pattern, "_combined.tif"))
+      writeRaster(combined_raster, output_file, overwrite = TRUE)
+      print(paste("Saved:", output_file))  # Debug message
+    }
+  }
+}
+```
+#creating the figures of the results- combined analogue with Optimal stress and combined analogue with Suitable stress
+
+```{r}
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_ggplot")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster_data <- rast(file)
+  
+  # Convert raster to data frame for ggplot
+  raster_df <- as.data.frame(raster_data, xy = TRUE)  # Include coordinates
+  
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade <- parts[2]  # e.g., "2020_2030"
+  pattern <- parts[4]  # e.g., "Optimal"
+  
+  # Plot using ggplot
+  p <- ggplot(data = raster_df, aes(x = x, y = y, fill = sum)) +  # Use 'sum' for the raster values
+    geom_tile() +
+    scale_fill_viridis_c(option = "viridis", na.value = "white") +  # Viridis color scale
+    labs(
+      title = paste0("Combined Result: ", ssp, " - ", decade, " - ", pattern),
+      fill = "Value"
+    ) +
+    theme_minimal() +
+    coord_fixed()  # Preserve aspect ratio
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  ggsave(output_figure, plot = p, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+
+
+#Saving all figures of the combined results with tmap instead of ggplot-using -Viridis color palette
+```{r}
+
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_tmap/minusviridis")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder, recursive = TRUE)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster <- rast(file)  # Use raster directly, not data frame
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- parts[2]  # e.g., "2021_2030"
+  pattern <- parts[4]  # e.g., "optimal"
+  title <- paste0("Combined Result: ", ssp, " - ", decade_range, " - ", pattern)
+  
+  # Create tmap plot
+  tmapplot <- tm_shape(raster) +  # Use SpatRaster here
+    tm_raster(
+      style = "cont",
+      breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+      palette = "-viridis",
+      title = "Value"
+    ) +
+    tm_basemap("Esri.WorldImagery") +  # Optional basemap
+    tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+    tm_layout(
+      title = title,
+      legend.outside = TRUE,
+      legend.outside.position = "right",
+      legend.outside.size = 0.30
+    )
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  tmap_save(tmapplot, filename = output_figure, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+#valing all in tmap with viridis 
+
+```{r}
+
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_tmap/viridis")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder, recursive = TRUE)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster <- rast(file)  # Use raster directly, not data frame
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- parts[2]  # e.g., "2021_2030"
+  pattern <- parts[4]  # e.g., "optimal"
+  title <- paste0("Combined Result: ", ssp, " - ", decade_range, " - ", pattern)
+  
+  # Create tmap plot
+  tmapplot <- tm_shape(raster) +  # Use SpatRaster here
+    tm_raster(
+      style = "cont",
+      breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+      palette = "viridis",
+      title = "Value"
+    ) +
+    tm_basemap("Esri.WorldImagery") +  # Optional basemap
+    tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+    tm_layout(
+      title = title,
+      legend.outside = TRUE,
+      legend.outside.position = "right",
+      legend.outside.size = 0.30
+    )
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  tmap_save(tmapplot, filename = output_figure, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+
+
+#saving all in tmap with other color- inferno palette
+```{r}
+
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_tmap/inferno")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder, recursive = TRUE)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster <- rast(file)  # Use raster directly, not data frame
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- parts[2]  # e.g., "2020_2030"
+  pattern <- parts[4]  # e.g., "optimal"
+  title <- paste0("Combined Result: ", ssp, " - ", decade_range, " - ", pattern)
+  
+  # Create tmap plot
+  tmapplot <- tm_shape(raster) +  # Use SpatRaster here
+    tm_raster(
+      style = "cont",
+      breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+      palette = "inferno",
+      title = "Value"
+    ) +
+    tm_basemap("Esri.WorldImagery") +  # Optional basemap
+    tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+    tm_layout(
+    title = title,
+        legend.outside = TRUE,
+      legend.outside.position = "right",
+      legend.outside.size = 0.30
+    )
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  tmap_save(tmapplot, filename = output_figure, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+
+```{r}
+#saving all in tmap with other color -inferno palette
+
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_tmap/minusinferno")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder, recursive = TRUE)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster <- rast(file)  # Use raster directly, not data frame
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- parts[2]  # e.g., "2020_2030"
+  pattern <- parts[4]  # e.g., "optimal"
+  title <- paste0("Combined Result: ", ssp, " - ", decade_range, " - ", pattern)
+  
+  # Create tmap plot
+  tmapplot <- tm_shape(raster) +  # Use SpatRaster here
+    tm_raster(
+      style = "cont",
+      breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+      palette = "-inferno",
+      title = "Value"
+    ) +
+    tm_basemap("Esri.WorldImagery") +  # Optional basemap
+    tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+    tm_layout(
+    title = title,
+        legend.outside = TRUE,
+      legend.outside.position = "right",
+      legend.outside.size = 0.30
+    )
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  tmap_save(tmapplot, filename = output_figure, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+
+#magma
+```{r}
+
+# Define folders
+Combined_results_folder <- here("output_data/Combined_Results")
+Figures_folder <- here("Figures/Combined_results_tmap/magma")
+
+# Create output folder for Figures if it doesn't exist
+if (!dir.exists(Figures_folder)) {
+  dir.create(Figures_folder, recursive = TRUE)
+}
+
+# List all combined raster files
+combined_files <- list.files(Combined_results_folder, pattern = "\\.tif$", full.names = TRUE)
+
+# Loop through each combined raster file
+for (file in combined_files) {
+  # Read the raster
+  raster <- rast(file)  # Use raster directly, not data frame
+  
+  # Extract filename components for labeling
+  file_name <- basename(file)
+  parts <- unlist(strsplit(file_name, "_"))
+  ssp <- parts[1]  # e.g., "ssp119"
+  decade_range <- parts[2]  # e.g., "2020_2030"
+  pattern <- parts[4]  # e.g., "optimal"
+  title <- paste0("Combined Result: ", ssp, " - ", decade_range, " - ", pattern)
+  
+  # Create tmap plot
+  tmapplot <- tm_shape(raster) +  # Use SpatRaster here
+    tm_raster(
+      style = "cont",
+      breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+      palette = "magma",
+      title = "Value"
+    ) +
+    tm_basemap("Esri.WorldImagery") +  # Optional basemap
+    tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+    tm_layout(
+    title = title,
+        legend.outside = TRUE,
+      legend.outside.position = "right",
+      legend.outside.size = 0.30
+    )
+  
+  # Save the figure
+  output_figure <- file.path(Figures_folder, paste0(file_name, ".png"))
+  tmap_save(tmapplot, filename = output_figure, width = 8, height = 6, dpi = 300)
+}
+
+print("Figures saved successfully!")
+```
+
+   

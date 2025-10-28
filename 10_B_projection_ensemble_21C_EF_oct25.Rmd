@@ -1,0 +1,151 @@
+---
+title: "10_projection_ensemble_21C"
+output: html_document
+date: 1st version "2024-12-10" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load packages
+
+```{r}
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+library(sf)
+```
+
+
+#define SSPs
+#for each SSP find the files in the folder output data
+#create a name for it to seach for a pattern
+#create a raster with nothing inside
+#for all z the layers in future projections (we excluded 1 because its in the past)
+#get the files with name analogue for each ssp 
+#print says in which step you are now
+##get the files with name analogue for each ssp
+#get the names of the decades
+#sum all the projections to see the amount of models that agree to each projection
+#save result as raster
+
+```{r}
+ssps <- c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585") # Name the SSP projections from IPCC
+
+for (i in 1:length(ssps)) { # For each SSP
+  names <- list.files(here("output_data"), pattern = ssps[[i]], full.names = T) # Find files
+  names2 <- names[grep("analogue", names)] # Filter for files named "analogue"
+  
+  for (z in 2:9) { # Loop over layers in future projections (excluding past, layer 1)
+    all <- rast() # Reset the raster stack for each decade
+    
+    for (k in 1:length(names2)) { # Loop over the filtered files
+      print(k)
+      r <- rast(names2[[k]]) # Load the raster
+      r2 <- r[[z]] # Extract the specific layer
+      
+      # Rename layers (decades)
+      current_names <- names(r2)
+      numeric_part <- as.numeric(sub("X", "", current_names)) # Remove the "X" prefix
+      decade_labels <- paste0((numeric_part * 10) + 1, "_", (numeric_part * 10) + 10)
+      names(r2) <- decade_labels # Assign new decade names
+      
+      all <- c(all, r2) # Add the layer to the raster stack
+      decade <- names(r2) # Get the renamed decade labels
+    }
+    
+    # Sum all projections to calculate the number of models that agree
+    sum_r <- app(all, fun = sum, na.rm = T)
+    
+    # Save the result as a raster
+    writeRaster(sum_r, 
+                here(paste0("output_data/Results/analogue_", ssps[[i]], "_", decade, ".tif")), 
+                overwrite = TRUE)
+  }
+}
+
+```
+
+# to Map all the rasters created we need to Load necessary vectors
+
+```{r}
+finfish_aqua_TAS<-vect("D:/Documents_HD/USC_Climate_smart_aquaculture/R_Code/raw_data/TasmanianAquaculture_FinFisheries/TasmanianAquaculture_FinFisheries.shp")
+```
+
+```{r}
+daysover_17C_historical<- read_rds(here("raw_data/Data17/jplMUR41_daysover_17C_TAS_20110101-20201231.rds")) %>%
+  unwrap()
+plot(daysover_17C_historical)
+```
+
+```{r}
+finfish_aqua_TAS_reproj<-project(finfish_aqua_TAS, daysover_17C_historical)
+```
+
+```{r}
+finfish_aqua_TAS_sf <- st_as_sf(finfish_aqua_TAS_reproj)
+```
+```{r}
+finfish_aqua_TAS_df<- as.data.frame(finfish_aqua_TAS_reproj, xy= TRUE)
+```
+
+#loop to get all the files generated before and plot them and then save them
+```{r}
+# Define SSP projections
+ssps <- c("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")
+
+# Loop through each SSP
+for (i in seq_along(ssps)) {
+  # Define file pattern to locate saved rasters
+  pattern <- paste0("analogue_", ssps[i])
+  
+  # List raster files matching the pattern
+  raster_files <- list.files(here("output_data/Results"), pattern = pattern, full.names = TRUE)
+  
+  # Loop through each raster file
+  for (raster_file in raster_files) {
+    # Load the raster
+    raster <- rast(raster_file)
+    
+    # Generate plot title based on file name
+    file_name <- tools::file_path_sans_ext(basename(raster_file)) # Get the base file name without extension
+    decade <- gsub(".*_", "", file_name) # Extract the decade info from the file name
+    title <- paste0("Number of models that agree area is \n an analogue in ", decade, "\n projection ", toupper(ssps[i]))
+    
+    # Generate the tmap plot
+    plot <- tm_shape(raster) +
+      tm_raster(style = "cont",
+                breaks = seq(min(raster[], na.rm = TRUE),
+                             max(raster[], na.rm = TRUE),
+                             length.out = nlyr(raster) + 1),
+                palette = "-viridis",
+                title = title) +
+      tm_shape(finfish_aqua_TAS_sf) + # places where the is aquaculture currently (check if you have already loaded)
+      tm_borders(col = "black") +
+      tm_basemap("Esri.WorldImagery") +
+      tm_layout(legend.outside = TRUE,
+                legend.outside.position = "right",
+                legend.outside.size = 0.30)
+    
+    # Save the plot
+    output_plot_path <- here("Figures/Plots", paste0(file_name, ".png"))
+    tmap_save(plot, output_plot_path, width = 8, height = 6, dpi = 300)
+    
+    # Print a message to track progress
+    message("Saved plot: ", output_plot_path)
+  }
+}
+
+```
+
+

@@ -1,0 +1,292 @@
+---
+title: "9- Reclassification fo files of days over 21.5C "
+date: 1st version "2024-11-26" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(terra)
+library(tidyverse)
+library(rasterVis)
+library(here)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(tmap)
+library(leaflet)
+```
+
+# Analogue areas (under or equal to 21 days per decade over 21.5C)
+# List files
+#SSP119 scenario
+
+```{r}
+fname21_ssp119<-list.files(here("raw_data/Data/"), pattern = "ssp119", full.names = T)
+```
+
+
+```{r}
+analogue21threshold<-21 #pick number of days that are equal in historical data over 21.5C to use in projections as the threshold
+```
+
+
+```{r}
+for(i in 1:length(fname21_ssp119)){
+  r<-read_rds(fname21_ssp119[[i]]) %>% 
+ unwrap(.)
+  
+  name<-fname21_ssp119[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r4<-r
+  r4[r4<=analogue21threshold]<-1
+  r4[r4>analogue21threshold]<-0
+  
+  writeRaster(r4, here(paste0("output_data/analogue", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 119 (21C)
+```{r}
+analogue21_CanESM5_119<-rast(here("output_data/analogue_CanESM5_ssp119_r1i1p.tiff"))
+analogue21_IPSL_CM6A_LR_119<-rast(here("output_data/analogue_IPSL-CM6A-LR_ssp119_.tiff"))
+analogue21_MIROC6_119<-rast(here("output_data/analogue_MIROC6_ssp119_r1i1p1.tiff"))
+analogue21_MRI_ESM2_0_119<-rast(here("output_data/analogue_MRI-ESM2-0_ssp119_r1.tiff"))
+
+#make for other models the same and plot them then intersect for each timeframe to check where they agree 
+```
+#ploting the SSP 119 scenario results for all decades
+```{r}
+plot(analogue21_CanESM5_119)
+plot(analogue21_IPSL_CM6A_LR_119)
+plot(analogue21_MIROC6_119)
+plot(analogue21_MRI_ESM2_0_119)
+```
+# List files
+#SSP126 scenario
+
+```{r}
+fname21_ssp126<-list.files(here("raw_data/Data/"), pattern = "ssp126", full.names = T)
+```
+
+
+```{r}
+analogue21threshold<-21 #pick number of days that are equal in historical data over 21.5C to use in projections as the threshold
+```
+
+
+```{r}
+for(i in 1:length(fname21_ssp126)){
+  r<-read_rds(fname21_ssp126[[i]]) %>% 
+ unwrap(.)
+  
+  name<-fname21_ssp126[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r5<-r
+  r5[r5<=analogue21threshold]<-1
+  r5[r5>analogue21threshold]<-0
+  
+  writeRaster(r5, here(paste0("output_data/analogue", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 226 (21C)
+```{r}
+analogue21_ACCESS_CM2_ssp126<- rast(here("output_data/analogue_ACCESS-CM2_ssp126_r1.tiff"))
+analogue21_ACCESS_ESM1_5_ssp126<- rast(here("output_data/analogue_ACCESS-ESM1-5_ssp126.tiff"))
+analogue21_CanESM5_ssp126<- rast(here("output_data/analogue_CanESM5_ssp126_r1i1p.tiff"))
+analogue21_CESM2_WACCM_ssp126<- rast(here("output_data/analogue_CESM2-WACCM_ssp126_r.tiff"))
+analogue21_CMCC_ESM2_ssp126<- rast(here("output_data/analogue_CMCC-ESM2_ssp126_r1i.tiff"))
+analogue21_IPSL_CM6A_LR_ssp126<- rast(here("output_data/analogue_IPSL-CM6A-LR_ssp126_.tiff"))
+analogue21_MIROC6_ssp126<- rast(here("output_data/analogue_MIROC6_ssp126_r1i1p1.tiff"))
+analogue21_MRI_ESM2_0_ssp126<- rast(here("output_data/analogue_MRI-ESM2-0_ssp126_r1.tiff"))
+analogue21_NorESM2_LM_ssp126<- rast(here("output_data/analogue_NorESM2-LM_ssp126_r1.tiff"))
+```
+
+#ploting the SSP 126 scenario results for all decades
+```{r}
+plot(analogue21_ACCESS_CM2_ssp126)
+plot(analogue21_ACCESS_ESM1_5_ssp126)
+plot(analogue21_CanESM5_ssp126)
+plot(analogue21_CESM2_WACCM_ssp126)
+plot(analogue21_CMCC_ESM2_ssp126)
+plot(analogue21_IPSL_CM6A_LR_ssp126)
+plot(analogue21_MIROC6_ssp126)
+plot(analogue21_MRI_ESM2_0_ssp126)
+plot(analogue21_NorESM2_LM_ssp126)
+```
+# List files
+#SSP245 scenario
+
+```{r}
+fname21_ssp245<-list.files(here("raw_data/Data/"), pattern = "ssp245", full.names = T)
+```
+
+
+```{r}
+analogue21threshold<-21 #pick number of days that are equal in historical data over 21.5C to use in projections as the threshold
+```
+
+
+```{r}
+for(i in 1:length(fname21_ssp245)){
+  r<-read_rds(fname21_ssp245[[i]]) %>% 
+ unwrap(.)
+  
+  name<-fname21_ssp245[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r6<-r
+  r6[r6<=analogue21threshold]<-1
+  r6[r6>analogue21threshold]<-0
+  
+  writeRaster(r6, here(paste0("output_data/analogue", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 226 (21C)
+```{r}
+analogue21_ACCESS_CM2_ssp245<- rast(here("output_data/analogue_ACCESS-CM2_ssp245_r1.tiff"))
+analogue21_ACCESS_ESM1_5_ssp245<- rast(here("output_data/analogue_ACCESS-ESM1-5_ssp245.tiff"))
+analogue21_CanESM5_ssp245<- rast(here("output_data/analogue_CanESM5_ssp245_r1i1p.tiff"))
+analogue21_CESM2_WACCM_ssp245<- rast(here("output_data/analogue_CESM2-WACCM_ssp245_r.tiff"))
+analogue21_CMCC_ESM2_ssp245<- rast(here("output_data/analogue_CMCC-ESM2_ssp245_r1i.tiff"))
+analogue21_IPSL_CM6A_LR_ssp245<- rast(here("output_data/analogue_IPSL-CM6A-LR_ssp245_.tiff"))
+analogue21_MIROC6_ssp245<- rast(here("output_data/analogue_MIROC6_ssp245_r1i1p1.tiff"))
+analogue21_MRI_ESM2_0_ssp245<- rast(here("output_data/analogue_MRI-ESM2-0_ssp245_r1.tiff"))
+analogue21_NorESM2_LM_ssp245<- rast(here("output_data/analogue_NorESM2-LM_ssp245_r1.tiff"))
+```
+
+#ploting the SSP 126 scenario results for all decades
+```{r}
+plot(analogue21_ACCESS_CM2_ssp245)
+plot(analogue21_ACCESS_ESM1_5_ssp245)
+plot(analogue21_CanESM5_ssp245)
+plot(analogue21_CESM2_WACCM_ssp245)
+plot(analogue21_CMCC_ESM2_ssp245)
+plot(analogue21_IPSL_CM6A_LR_ssp245)
+plot(analogue21_MIROC6_ssp245)
+plot(analogue21_MRI_ESM2_0_ssp245)
+plot(analogue21_NorESM2_LM_ssp245)
+```
+
+#SSP370 scenario
+# List files
+
+```{r}
+fname21_ssp370<-list.files(here("raw_data/Data/"), pattern = "ssp370", full.names = T)
+```
+
+#maintain the threshold
+```{r}
+analogue21threshold<-21 #pick number of days that are equal in historical data over 21.5C to use in projections as the threshold
+```
+
+#reclassify the files to find analogues (that have less or = than 21 days per decade over 21C)
+```{r}
+for(i in 1:length(fname21_ssp370)){
+  r<-read_rds(fname21_ssp370[[i]]) %>% 
+ unwrap(.)
+  
+  name<-fname21_ssp370[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r7<-r
+  r7[r7<=analogue21threshold]<-1
+  r7[r7>analogue21threshold]<-0
+  
+  writeRaster(r7, here(paste0("output_data/analogue", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 226 (21C)
+```{r}
+analogue21_ACCESS_CM2_ssp370<- rast(here("output_data/analogue_ACCESS-CM2_ssp370_r1.tiff"))
+analogue21_ACCESS_ESM1_5_ssp370<- rast(here("output_data/analogue_ACCESS-ESM1-5_ssp370.tiff"))
+analogue21_CanESM5_ssp370<- rast(here("output_data/analogue_CanESM5_ssp370_r1i1p.tiff"))
+analogue21_CESM2_WACCM_ssp370<- rast(here("output_data/analogue_CESM2-WACCM_ssp370_r.tiff"))
+analogue21_CMCC_ESM2_ssp370<- rast(here("output_data/analogue_CMCC-ESM2_ssp370_r1i.tiff"))
+analogue21_IPSL_CM6A_LR_ssp370<- rast(here("output_data/analogue_IPSL-CM6A-LR_ssp370_.tiff"))
+analogue21_MIROC6_ssp370<- rast(here("output_data/analogue_MIROC6_ssp370_r1i1p1.tiff"))
+analogue21_MRI_ESM2_0_ssp370<- rast(here("output_data/analogue_MRI-ESM2-0_ssp370_r1.tiff"))
+analogue21_NorESM2_LM_ssp370<- rast(here("output_data/analogue_NorESM2-LM_ssp370_r1.tiff"))
+```
+
+#ploting the SSP 126 scenario results for all decades
+```{r}
+plot(analogue21_ACCESS_CM2_ssp370)
+plot(analogue21_ACCESS_ESM1_5_ssp370)
+plot(analogue21_CanESM5_ssp370)
+plot(analogue21_CESM2_WACCM_ssp370)
+plot(analogue21_CMCC_ESM2_ssp370)
+plot(analogue21_IPSL_CM6A_LR_ssp370)
+plot(analogue21_MIROC6_ssp370)
+plot(analogue21_MRI_ESM2_0_ssp370)
+plot(analogue21_NorESM2_LM_ssp370)
+```
+#SSP585 scenario
+# List files
+
+```{r}
+fname21_ssp585<-list.files(here("raw_data/Data/"), pattern = "ssp585", full.names = T)
+```
+
+#maintain the threshold
+```{r}
+analogue21threshold<-21 #pick number of days that are equal in historical data over 21.5C to use in projections as the threshold
+```
+
+#reclassify the files to find analogues (that have less or = than 21 days per decade over 21C)
+```{r}
+for(i in 1:length(fname21_ssp585)){
+  r<-read_rds(fname21_ssp585[[i]]) %>% 
+ unwrap(.)
+  
+  name<-fname21_ssp585[[i]]
+  name2<-substring(name, 82, 102) #find way to only separate out the part you want using string
+  
+  r8<-r
+  r8[r8<=analogue21threshold]<-1
+  r8[r8>analogue21threshold]<-0
+  
+  writeRaster(r8, here(paste0("output_data/analogue", name2, ".tiff")), overwrite = TRUE)
+}
+```
+
+#checking what was done for SSP 226 (21C)
+```{r}
+analogue21_ACCESS_CM2_ssp585<- rast(here("output_data/analogue_ACCESS-CM2_ssp585_r1.tiff"))
+analogue21_ACCESS_ESM1_5_ssp585<- rast(here("output_data/analogue_ACCESS-ESM1-5_ssp585.tiff"))
+analogue21_CanESM5_ssp585<- rast(here("output_data/analogue_CanESM5_ssp585_r1i1p.tiff"))
+analogue21_CESM2_WACCM_ssp585<- rast(here("output_data/analogue_CESM2-WACCM_ssp585_r.tiff"))
+analogue21_CMCC_ESM2_ssp585<- rast(here("output_data/analogue_CMCC-ESM2_ssp585_r1i.tiff"))
+analogue21_IPSL_CM6A_LR_ssp585<- rast(here("output_data/analogue_IPSL-CM6A-LR_ssp585_.tiff"))
+analogue21_MIROC6_ssp585<- rast(here("output_data/analogue_MIROC6_ssp585_r1i1p1.tiff"))
+analogue21_MRI_ESM2_0_ssp585<- rast(here("output_data/analogue_MRI-ESM2-0_ssp585_r1.tiff"))
+analogue21_NorESM2_LM_ssp585<- rast(here("output_data/analogue_NorESM2-LM_ssp585_r1.tiff"))
+```
+
+#ploting the SSP 126 scenario results for all decades
+```{r}
+plot(analogue21_ACCESS_CM2_ssp585)
+plot(analogue21_ACCESS_ESM1_5_ssp585)
+plot(analogue21_CanESM5_ssp585)
+plot(analogue21_CESM2_WACCM_ssp585)
+plot(analogue21_CMCC_ESM2_ssp585)
+plot(analogue21_IPSL_CM6A_LR_ssp585)
+plot(analogue21_MIROC6_ssp585)
+plot(analogue21_MRI_ESM2_0_ssp585)
+plot(analogue21_NorESM2_LM_ssp585)
+```
+
+
+# then intersect for each timeframe to check where they agree
+#go to code 10_A_projection_ensemble

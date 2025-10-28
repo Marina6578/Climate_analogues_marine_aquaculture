@@ -1,0 +1,763 @@
+---
+title: "MSP1_Code_function_Constraints"
+date: 1st version "2025-03-14" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+---
+
+#In this code we create a function to map the constraints to aquaculture and the overlapp them creating a constraints mask that will be used later. we also crete a figure of the constraint maps with marine zones 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load packages needed
+```{r}
+library(raster)
+library(sf)
+library(here)
+library(tidyverse)
+library(tmap)
+library(terra)
+library(dplyr)
+library(fasterize)
+```
+```{r}
+#create a bounding box for our region of interest->
+xmin <- 140.995
+ymin <- -47.255
+xmax <- 153.005
+ymax <- -38.995
+```
+
+
+#create a polygon from the bounding box as the region of interest match
+```{r}
+bbox_coords<- matrix(c(xmin, ymin,
+                        xmax, ymin,
+                        xmax, ymax,
+                        xmin, ymax,
+                        xmin, ymin), 
+                      ncol = 2, byrow = TRUE)
+
+# Create an sf polygon object
+bbox_polygon <- st_polygon(list(bbox_coords))
+bbox_sf_TAS <- st_sfc(bbox_polygon, crs = 4326)  # if we want WGS 84 coordinate system
+
+```
+
+
+#check if BBox is valid and reproject it
+```{r}
+BBOX_Valid<- st_make_valid(bbox_sf_TAS)
+#turn it into a valid polygon
+BBOX_TAS_3577<-st_transform(BBOX_Valid, 3577)
+```
+
+
+#create the function
+#model workflow to make binary rasters of constraints
+```{r}
+create_binary_constraint <- function(vector_data, 
+                                   constraint_name,
+                                   output_folder = "output_data/Constraints",  # Added this parameter
+                                   unsuitable_value = 0,
+                                   suitable_value = 1) {
+  
+  # Ensure vector_data is valid
+  vector_data <- st_make_valid(vector_data)
+  
+  # Create template raster explicitly
+  template_raster <- rast(
+    ext(140.0, 162, -57, -36),
+    resolution = 0.005,
+    crs = "EPSG:4326"
+  )
+  
+  # Project template to match vector data CRS
+  template_3577 <- project(template_raster, "EPSG:3577")
+  
+  # Initialize raster with suitable values
+  constraint <- init(template_3577, suitable_value)
+  
+  # Convert to SpatVector for terra
+  vector_data_vect <- vect(vector_data)
+  
+  # Rasterize
+  constraint <- terra::rasterize(
+    vector_data_vect, 
+    constraint,
+    field = unsuitable_value,
+    update = TRUE,
+    touches = TRUE
+  )
+  
+  # Create output directory if it doesn't exist
+  dir.create(here(output_folder), recursive = TRUE, showWarnings = FALSE)
+  
+  # Save the constraint
+  writeRaster(constraint,
+             filename = here(output_folder, paste0(constraint_name, "_constraint.tif")),
+             overwrite = TRUE)
+  
+  # Create verification plots
+  par(mfrow=c(1,2))
+  plot(constraint, 
+       main = paste0(constraint_name, " Constraints\n(0 = Unsuitable, 1 = Suitable)"),
+       col = c("red", "green"))
+  
+  plot(constraint, main = "Verification with Original Data")
+  plot(vector_data_vect, add = TRUE, col = "blue")
+  
+  # Print summary statistics
+  cat("\nSummary for", constraint_name, "constraint:\n")
+  print(freq(constraint))
+  
+  return(constraint)
+}
+```
+
+#Creating the other ocean uses layers one by one 
+
+#Reefs 
+#Upload the data, transform it to the projection we are using Australian Albers EPSG 3577 and take a look
+```{r}
+Seamap_Tas2009<-st_read(here("raw_data/SeamapAus_TAS_SeamapTas/SeamapAus_TAS_SeamapTasPolygon.shp"))
+
+#plot(Seamap_Tas2009)
+
+Seamap_Tas2009_reproj<-st_transform(Seamap_Tas2009, 3577)
+
+plot(Seamap_Tas2009_reproj)
+```
+#Filter only the reefs- Our dataset has many other types f substrata and we need to filter only the reefs for it
+
+```{r}
+# Process the reef data and filter only the reefs
+reefs <- Seamap_Tas2009_reproj %>%
+  filter(SM_HAB_CLS %in% c("Reef", "High profile reef", 
+                           "Medium profile reef", "Low profile reef", 
+                           "Patchy reef")) %>%
+  st_make_valid() %>%
+  mutate(constraint = 1)  # Add a column for rasterization
+
+```
+
+#Create reef binary constraint layer
+```{r}
+reef_constraint <- create_binary_constraint(
+  vector_data = reefs,
+  constraint_name = "reef",
+  output_folder = "output_data/Constraints_2024"  # folder name
+)
+```
+
+#Constraints due to Conservation
+#Constraint Federal Parks
+#Upload and project the vectors
+#CAPAD 2024-data with adaptations brought by the south-east-network-management-plan-2025.pdf 
+```{r}
+#federal marine parks
+AMPAs<- st_read(here("raw_data/CAPAD_2024_Marine/Collaborative_Australian_Protected_Areas_Database_(CAPAD)_2024_-_Marine.shp"))
+
+AMPAs_3577<-st_transform(AMPAs, 3577)
+
+```
+#Focus on Tasmania our Region of intererest
+```{r}
+
+# Check what zones exist in Tasmania region
+AMPAs_TAS <- AMPAs_3577 %>%
+  st_intersection(BBOX_TAS_3577) #  Tasmania boundary BBOX
+
+# Look at unique zone types in Tasmania
+unique_IUCN <- AMPAs_TAS %>%
+  pull(IUCN) %>%
+  unique()
+
+print("Zone types in Tasmania:")
+print(unique_IUCN)
+```
+```{r}
+# Change IUCN values for specific row numbers to follow south-east-network-management-plan-2025.pdf 
+AMPAs_TAS_25 <- AMPAs_TAS
+```
+
+```{r}
+AMPAs_TAS_25 <- AMPAs_TAS_25 %>%
+  mutate(IUCN = case_when(
+    PA_PID %in% c("124_0002_M", "151_0001_M", "093_0001_M", "115_0003_M") ~ "II",
+    TRUE ~ IUCN
+  ))
+```
+
+# Save the modified dataframe as GPKG in the raw_data folder
+```{r}
+st_write(AMPAs_TAS_25, 
+         here("raw_data", "AMPAs_TAS_25_modified.gpkg"), 
+         delete_dsn = TRUE)  # This overwrites if file already exists
+
+```
+#FILTER TO
+#Include all strict protection zones (IUCN IA)
+#Include all National Park level zones (IUCN II)
+#Include restrictive IUCN IV zones
+#Exclude multiple use and general use zones (IUCN VI)
+#Exclude unzoned areas
+
+#IUCN IA, II zones typically don't allow aquaculture
+#Some IUCN IV zones might restrict aquaculture
+#IUCN VI zones (Multiple Use, General Use) typically allow aquaculture with proper permits (IA, B , II, III, IV) should be more strict
+```{r}
+AMPAs_filtered <- AMPAs_TAS_25 %>%
+  filter(IUCN %in% c( "I", "Ia", "II", "III",
+        "IV"
+  )) %>%
+  st_make_valid() %>%
+  mutate(constraint = 1)
+```
+
+
+#Create the AMPAs exclusive binary layer
+```{r}
+AMPAs_constraint <- create_binary_constraint(
+  vector_data = AMPAs_filtered,
+  constraint_name = "AMPAs",
+  output_folder = "output_data/Constraints_2024"
+)
+```
+
+
+#Constraints of Tasmanian marine Parks 
+#Upload and project the vectors
+```{r}
+Marine_Parks_TAS<- st_read(here("raw_data/LIST_MARINE_NATURE_RESERVES_STATEWIDE/list_marine_nature_reserves_statewide.shp"))
+
+Marine_parks_TAS_reproj<-st_transform(Marine_Parks_TAS, 3577)
+```
+
+```{r}
+#marine_parks_filtered <- marine_parks_tas_reproj %>%
+ # filter(ZONE_TYPE %in% c("No Take Zone", "Restricted Take Zone")) %>%
+ # st_make_valid() %>%
+ #mutate(constraint = 1)
+```
+
+#Create the Marine parks constraints layer
+```{r}
+marine_parks_constraint <- create_binary_constraint(
+  vector_data = Marine_parks_TAS_reproj,
+  constraint_name = "marine_parks",
+  output_folder = "output_data/Constraints_2024"
+)
+```
+
+  
+#Load and transform kelp data
+```{r}
+kelp_data <- st_read(here("raw_data/GIANT_KELP_AERIAL_SURVEY_2019_STATEWIDE/Giant_Kelp_Aerial_Survey_2019_statewide.shp"))
+kelp_data_3577 <- st_transform(kelp_data, "EPSG:3577")
+
+```
+#Create kelp binary constraint layer
+```{r}
+kelp_constraint <- create_binary_constraint(
+  vector_data = kelp_data_3577,
+  constraint_name = "kelp",
+  output_folder = "output_data/Constraints_2024"
+)
+
+```
+
+
+
+
+#Shipping constraints
+
+```{r}
+# Load and prepare shipping data
+shipping_priority_Tasmania <- rast(here("output_data/shipping_priority_Tasmania.tif"))
+crs(shipping_priority_Tasmania) <- "EPSG:4326"
+shipping_priority_3577 <- project(shipping_priority_Tasmania, "EPSG:3577")
+
+# Create binary constraint using the same logic you had
+rcl_matrix <- matrix(c(
+  NA, NA, 1,    # NA values become 1 (suitable)
+  0, 0, 1,      # No shipping (0) becomes 1 (suitable)
+  0.0000001, max(values(shipping_priority_3577), na.rm = TRUE), 0  # Any shipping activity becomes 0 (unsuitable)
+), ncol = 3, byrow = TRUE)
+
+# Reclassify
+shipping_constraint <- classify(shipping_priority_3577, rcl_matrix)
+
+# Create verification plots (matching other constraints)
+par(mfrow=c(1,2))
+plot(shipping_constraint, 
+     main = "Shipping Constraints\n(0 = Unsuitable, 1 = Suitable)",
+     col = c("red", "green"))
+
+plot(shipping_constraint, 
+     main = "Shipping Constraints Verification")
+
+# Print summary statistics
+cat("\nSummary for shipping constraint:\n")
+print(freq(shipping_constraint))
+
+# Save with standardized naming
+writeRaster(shipping_constraint,
+            filename = here("output_data", "Constraints_2024", "shipping_constraint.tif"),
+            overwrite = TRUE)
+```
+
+
+#Bathymetry constraints
+```{r}
+# Load and prepare bathymetry data
+bathymetry2023 <- rast(here("raw_data/Australian Bathymetry and Topography 2023 250m/Australian_Bathymetry_and_Topography_2023_250m_MSL_cog.tif"))
+e <- ext(140.995, 153.005, -47.255, -38.995)
+bathymetry_tassie <- crop(bathymetry2023, e)
+bathymetry_tassie_reproj <- project(bathymetry_tassie, "EPSG:3577")
+
+# Create binary classification (your existing logic)
+rcl_matrix_bathy <- matrix(c(
+  -Inf, -10, 1,    # Deeper than 10m = suitable (1)
+  -10, Inf, 0      # Shallower than 10m = unsuitable (0)
+), ncol = 3, byrow = TRUE)
+
+# Reclassify
+bathy_constraint <- classify(bathymetry_tassie_reproj, rcl_matrix_bathy)
+
+# Create verification plots (matching other constraints)
+par(mfrow=c(1,2))
+plot(bathy_constraint, 
+     main = "Bathymetry Constraints\n(0 = Unsuitable, 1 = Suitable)",
+     col = c("red", "green"))
+
+plot(bathy_constraint, 
+     main = "Bathymetry Constraints Verification")
+
+# Print summary statistics
+cat("\nSummary for bathymetry constraint:\n")
+print(freq(bathy_constraint))
+
+# Save with standardized naming
+writeRaster(bathy_constraint,
+            filename = here("output_data", "Constraints_2024", "bathymetry_constraint.tif"),
+            overwrite = TRUE)
+```
+#territory_that is land_and constrains aquaculture
+```{r}
+Au_states <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp"))
+```
+
+
+```{r}
+# All relevant states terrestrial
+states_shp <- Au_states %>%
+  filter(STE_CODE21 %in% c("6", "2", "1", "4")) %>%  # Tasmania, Victoria, NSW, SA
+  st_transform(3577) %>%
+  mutate(state_name = case_when(
+    STE_CODE21 == "6" ~ "Terrestrial Tasmania",
+    STE_CODE21 == "2" ~ "Terrestrial Victoria",
+    STE_CODE21 == "1" ~ "Terrestrial NSW",
+    STE_CODE21 == "4" ~ "Terrestrial SA"
+  ))
+```
+```{r}
+land_constraint <- create_binary_constraint(
+  vector_data = states_shp,
+  constraint_name = "land",
+  output_folder = "output_data/Constraints_2024")
+```
+
+
+
+```{r}
+#tmap_mode("view")
+tmap_mode("plot)
+```
+
+#saving the constraint results to use further
+
+```{r}
+tm_shape(shipping_constraint) +
+  tm_raster(palette = c("blue", NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +
+tm_shape(kelp_constraint) +
+  tm_raster(palette = c("green", NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Kelp Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +  
+tm_shape(reef_constraint) +
+  tm_raster(palette = c("darkgreen", NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Reef Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +  
+tm_shape(bathy_constraint) +
+  tm_raster(palette = c("lightgrey", NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Bathymetry Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +  
+tm_shape(marine_parks_constraint) +
+  tm_raster(palette = c("darkgrey", NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "Marine Parks Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +  
+tm_shape(AMPAs_constraint) +
+  tm_raster(palette = c("darkgrey", NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "Federal Marine Parks Constraint",
+            breaks = c(0, 0.5, 1),
+            legend.show = TRUE) +
+tm_layout(legend.outside = TRUE,
+          legend.outside.position = "right",
+          legend.title.size = 0.8,
+          legend.text.size = 0.6,
+          main.title = "Aquaculture Constraints",
+          main.title.position = "center")
+```
+
+
+```{r}
+# First, let's create a template raster with the desired extent in the target projection
+# Create the bounding box in WGS84 first
+bbox_coords <- matrix(c(140.995, -47.255, 
+                        153.005, -47.255, 
+                        153.005, -38.995, 
+                        140.995, -38.995, 
+                        140.995, -47.255), ncol=2, byrow=TRUE)
+
+# Create a polygon from the coordinates
+bbox_poly <- vect(bbox_coords, type="polygon", crs="EPSG:4326")
+
+# Project the polygon to Australian Albers
+bbox_poly_albers <- project(bbox_poly, "EPSG:3577")
+
+# Create the template raster based on the projected extent
+template_3577 <- rast(ext(bbox_poly_albers), resolution=500, crs="EPSG:3577")
+
+# Resample all constraints to match the template
+kelp_aligned <- resample(kelp_constraint, template_3577)
+reef_aligned <- resample(reef_constraint, template_3577)
+bathy_aligned <- resample(bathy_constraint, template_3577)
+marine_parks_aligned <- resample(marine_parks_constraint, template_3577)
+AMPAs_aligned <- resample(AMPAs_constraint, template_3577)
+shipping_aligned <- resample(shipping_constraint, template_3577)
+land_aligned<- resample(land_constraint, template_3577)
+
+# Calculate the total constraints layer
+total_constraints <- kelp_aligned * reef_aligned * bathy_aligned * 
+                    marine_parks_aligned * AMPAs_aligned * shipping_aligned * land_aligned
+
+# Save the combined constraints
+writeRaster(total_constraints,
+            filename = here("output_data", "Constraints_2024", "total_constraints.tif"),
+            overwrite = TRUE)
+
+# Load viridis for better color palettes
+library(viridis)
+
+# Create a map showing all constraints with different colors for unsuitable areas
+tm_shape(total_constraints) +
+  tm_raster(palette = c("#440154", "#238A8D"), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Combined Constraints",
+            breaks = c(0, 0.5, 1)) +
+tm_shape(shipping_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+  tm_shape(land_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "land",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(kelp_aligned) +
+  tm_raster(palette = c(viridis(1, option="magma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Kelp",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(reef_aligned) +
+  tm_raster(palette = c(viridis(1, option="inferno"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Reef",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(bathy_aligned) +
+  tm_raster(palette = c(viridis(1, option="cividis"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Bathymetry",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(marine_parks_aligned) +
+  tm_raster(palette = c(viridis(1, option="mako"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "State Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(AMPAs_aligned) +
+  tm_raster(palette = c(viridis(1, option="turbo"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "Federal Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(land_aligned) +
+   tm_raster(palette = c(viridis(1, option="turbo"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "land area",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_layout(legend.outside = TRUE,
+          legend.outside.position = "right",
+          legend.title.size = 0.8,
+          legend.text.size = 0.6,
+          main.title = "Aquaculture Constraints",
+          main.title.position = "center")
+```
+
+```{r}
+# Save the combined constraints raster (this line is already in your code)
+writeRaster(total_constraints,
+            filename = here("output_data", "Constraints_2024", "total_constraints.tif"),
+            overwrite = TRUE)
+
+# Create the visualization with viridis colors
+constraint_map <- tm_shape(total_constraints) +
+  tm_raster(palette = c("#440154", "#238A8D"), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Combined Constraints",
+            breaks = c(0, 0.5, 1)) +
+tm_shape(shipping_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+  tm_shape(land_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "land",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(kelp_aligned) +
+  tm_raster(palette = c(viridis(1, option="magma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Kelp",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(reef_aligned) +
+  tm_raster(palette = c(viridis(1, option="inferno"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Reef",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(bathy_aligned) +
+  tm_raster(palette = c(viridis(1, option="cividis"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Bathymetry",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(marine_parks_aligned) +
+  tm_raster(palette = c(viridis(1, option="mako"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "State Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(AMPAs_aligned) +
+  tm_raster(palette = c(viridis(1, option="turbo"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "Federal Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(shipping_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_layout(legend.outside = TRUE,
+          legend.outside.position = "right",
+          legend.title.size = 0.8,
+          legend.text.size = 0.6,
+          main.title = "Aquaculture Constraints",
+          main.title.position = "center")
+
+# Save the map
+# Create directory if it doesn't exist
+dir.create(here("output_data", "Constraints_2024"), showWarnings = FALSE, recursive = TRUE)
+
+# As PNG
+tmap_save(constraint_map,
+          filename = here("output_data", "Constraints_2024", "combined_constraints_map_viridis.png"),
+          width = 10,  # Increased width to accommodate the legend
+          height = 10,
+          dpi = 300)
+
+# As PDF (optional, for higher quality)
+tmap_save(constraint_map,
+          filename = here("output_data", "Constraints_2024", "combined_constraints_map_viridis.pdf"),
+          width = 10,  # Increased width to accommodate the legend
+          height = 10)
+
+# Display the map in R
+constraint_map
+```
+
+#constraint map with marine zones
+
+#upload zones
+```{r}
+# Read marine zone shapefiles
+#contains terrestrial areas-beware we have to exclude them
+# 1.  Create bbox in Albers
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_as_sf() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+#2. Load and process all required data
+maritime_boundaries_AU<- st_read(here("raw_data/AU_GA_SSLA-1973-AMB2014a_Maritime_boundaries_Australia/AU_GA_SSLA_1973_AMB2014a_ts_1990_poly.shp"))%>%
+ st_transform("EPSG:3577")%>%
+ st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# 3. Crop all layers to bbox
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+maritime_boundaries_crop<-st_intersection(maritime_boundaries_AU,bbox_albers)
+
+state_waters<-st_union(coastal_waters_crop, maritime_boundaries_crop)
+state_waters_final <- st_difference(state_waters, st_union(terrestrial_areas_crop))
+
+# 4. Create High Seas
+all_managed_waters_and_land <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters_final, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "terrestrial_areas")
+)
+
+high_seas <- st_difference(bbox_albers, st_union(all_managed_waters_and_land))
+```
+
+
+#build the map with zones
+```{r}
+# Create the visualization with viridis colors
+constraint_map_with_zones <- tm_shape(total_constraints) +
+  tm_raster(palette = c("#440154", "#238A8D"), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Combined Constraints",
+            breaks = c(0, 0.5, 1)) +
+tm_shape(shipping_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+  tm_shape(land_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "land",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(kelp_aligned) +
+  tm_raster(palette = c(viridis(1, option="magma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Kelp",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(reef_aligned) +
+  tm_raster(palette = c(viridis(1, option="inferno"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Reef",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(bathy_aligned) +
+  tm_raster(palette = c(viridis(1, option="cividis"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Bathymetry",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(marine_parks_aligned) +
+  tm_raster(palette = c(viridis(1, option="mako"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "State Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +  
+tm_shape(AMPAs_aligned) +
+  tm_raster(palette = c(viridis(1, option="turbo"), NA),
+            labels = c("Unsuitable", "Suitable"),
+            title = "Federal Marine Parks",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+tm_shape(shipping_aligned) +
+  tm_raster(palette = c(viridis(1, option="plasma"), NA), 
+            labels = c("Unsuitable", "Suitable"),
+            title = "Shipping",
+            breaks = c(0, 0.5, 1),
+            alpha = 0.7) +
+  tm_shape(state_waters_final) +
+  tm_polygons(palette = c(viridis(1, option="plasma"), NA), 
+            title = "State waters",
+            alpha = 0.2) +
+ tm_shape(commonwealth_crop) +
+  tm_polygons(palette = c(viridis(1, option="plasma"), NA), 
+            title = "Commonwealth waters",
+            alpha = 0.2) +
+  tm_shape(high_seas) +
+  tm_polygons(palette = c(viridis(1, option="plasma"), NA), 
+            title = "High Seas",
+            alpha = 0.2) +
+tm_layout(legend.outside = TRUE,
+          legend.outside.position = "right",
+          legend.title.size = 0.8,
+          legend.text.size = 0.6,
+          main.title = "Aquaculture Constraints",
+          main.title.position = "center")
+
+# Save the map
+# Create directory if it doesn't exist
+dir.create(here("output_data", "Constraints_2024"), showWarnings = FALSE, recursive = TRUE)
+
+# As PNG
+tmap_save(constraint_map_with_zones,
+          filename = here("output_data", "Constraints_2024", "combined_constraint_map_with_zones_viridis.png"),
+          width = 10,  # Increased width to accommodate the legend
+          height = 10,
+          dpi = 300)
+
+# As PDF (optional, for higher quality)
+tmap_save(constraint_map,
+          filename = here("output_data", "Constraints_2024", "combined_constraint_map_with_zones_viridis.pdf"),
+          width = 10,  # Increased width to accommodate the legend
+          height = 10)
+
+# Display the map in R
+constraint_map_with_zones
+```
+
+#after we have mapped the constraints to aquaculture go to code 14_km2_suitability_over_time_results_EF_Oct25
+

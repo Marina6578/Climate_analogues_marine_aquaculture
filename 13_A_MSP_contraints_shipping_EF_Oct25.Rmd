@@ -1,0 +1,196 @@
+---
+title: "Code_contraints_shipping"
+date: 1st version "2024-10-23" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load the possible packages being used 
+```{r}
+library(ncdf4)
+library(raster)
+library(sf)
+library(here)
+library(tidyverse)
+library(tmap)
+library(terra)
+library(dplyr)
+library(stars)
+
+
+```
+
+#create a bounding box for our region of interest->
+#create a bounding box for Tasmania #latitude = c(-57, -36) #longitude = c(10, 162)
+```{r}
+xmin <- 140.0
+ymin <- -57
+xmax <- 162
+ymax <- -36
+```
+
+
+#create a polygon from the bounding box as the region of interest match
+```{r}
+bbox_coords<- matrix(c(xmin, ymin,
+                        xmax, ymin,
+                        xmax, ymax,
+                        xmin, ymax,
+                        xmin, ymin), 
+                      ncol = 2, byrow = TRUE)
+
+# Create an sf polygon object
+bbox_polygon <- st_polygon(list(bbox_coords))
+bbox_sf_TAS <- st_sfc(bbox_polygon, crs = 4326)  # if we want WGS 84 coordinate system
+
+```
+
+
+```{r}
+BBOX_Valid<- st_make_valid(bbox_sf_TAS)
+```
+```{r}
+BBOX_TAS_3577<-st_transform(BBOX_Valid, 3577)
+```
+
+
+#shipping lanes upload
+#shipping AMSA
+
+```{r}
+shipping<-st_read(here("raw_data/Vessel Traffic Data August 2024/cts_srr_08_2024_pt/cts_srr_08_2024_pt/cts_srr_08_2024_pt.shp"))
+```
+```{r}
+qtm(shipping)
+```
+
+
+```{r}
+# Crop shipping to bounding box
+shipping_bbox <- st_crop(shipping, BBOX_Valid)
+
+# Reproject coordinates
+shipping_prj <- st_transform(shipping_bbox, crs = 3577)
+```
+#create the 1km buffer
+```{r}
+shipping_buffer <- st_buffer(shipping_prj, dist = 1000)
+
+```
+# Filter
+```{r}
+unique(shipping_buffer$TYPE)
+shipping_filt <- shipping_buffer %>%
+  filter(grepl("Tanker|Cargo", TYPE))
+unique(shipping_filt$TYPE)
+```
+
+```{r}
+# Create column of 1's
+shipping_filt$value <- 1
+```
+
+
+```{r}
+# Transform crs
+shipping_final <- st_transform(shipping_filt, crs = 3577)
+```
+
+#make lines
+#maintaining other columns with all values 
+```{r}
+shipping_priority <- shipping_final %>%
+  group_by(CRAFT_ID) %>%
+  filter(n() > 1) %>% #ensures that only groups with more than one point are kept, which is necessary to form a valid line string (if I didn't use this all the data set went bad)
+  summarise(totalvalue= sum(value),
+            do_union = TRUE,
+            LON = list(LON),
+            LAT = list(LAT)) %>%
+  st_cast("MULTILINESTRING")
+```
+
+#plot
+```{r}
+tm_shape(shipping_priority)+
+  tm_lines()
+```
+#shipping priority filtering by quantile
+
+#separating by quantile
+```{r}
+top_quantile_threshold <- quantile(shipping_priority$totalvalue, 0.75)
+```
+```{r}
+# Filter the SpatVector to keep only features in the highest (top 25%) quantile
+highest_quantile_shipping_priority <- subset(shipping_priority, totalvalue >= top_quantile_threshold)
+```
+
+```{r}
+qtm(highest_quantile_shipping_priority)
+```
+
+```{r}
+library(terra)
+library(sf)
+library(here)
+
+# Ensure bbox_ext is in EPSG:3577 (Australian Albers)
+bbox_ext <- ext(xmin, xmax, ymin, ymax)  # Define your bounding box
+
+# Create a raster with the correct CRS (EPSG:3577)
+output_raster <- rast(bbox_ext, res = 0.02, crs = "EPSG:3577")
+
+# Check if 'totalvalue' exists in the vector data
+if (!"totalvalue" %in% names(highest_quantile_shipping_priority)) {
+  stop("The field 'totalvalue' does not exist in the vector data.")
+}
+
+# Handle any NA values in 'totalvalue'
+if (anyNA(highest_quantile_shipping_priority$totalvalue)) {
+  warning("The 'totalvalue' field contains missing values.")
+  highest_quantile_shipping_priority$totalvalue[is.na(highest_quantile_shipping_priority$totalvalue)] <- 0
+}
+
+# Rasterize the vector data
+shipping_priority_r <- rasterize(
+  highest_quantile_shipping_priority,
+  output_raster,
+  field = "totalvalue",
+  fun = "sum"
+)
+
+# Ensure the CRS of the raster is EPSG:3577 (already handled by raster creation)
+cat("Raster CRS:", crs(shipping_priority_r), "\n")
+
+# Check if rasterization was successful
+if (is.null(shipping_priority_r)) {
+  stop("Rasterization failed. Check input data and parameters.")
+}
+
+# Ensure the 'output_data' directory exists
+dir.create(here('output_data'), recursive = TRUE, showWarnings = FALSE)
+
+# Write the raster to a file
+writeRaster(
+  shipping_priority_r, 
+  filename = here('output_data/shipping_priority_r.tif'), 
+  overwrite = TRUE
+)
+
+# Confirm the file was saved
+if (file.exists(here('output_data/shipping_priority_tasmania_reproj.tif'))) {
+  cat("Raster file successfully saved!\n")
+} else {
+  cat("Failed to save raster file.\n")
+}
+
+# Plot to verify
+plot(shipping_priority_r)
+```
+
+#go to code 13_MSP_FINAL_Code_function_Constraints_EF_Oct25

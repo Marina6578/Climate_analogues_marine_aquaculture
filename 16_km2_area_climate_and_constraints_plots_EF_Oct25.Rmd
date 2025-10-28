@@ -1,0 +1,1650 @@
+---
+title: "16_km2_area_climate_and_constraints_plots_EF_Oct25"
+date: 1st version "2025-07-24" this version"2025-10-27"
+author: Marina Christofidis (marina.christofidis@griffithuni.edu.au)
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load packages
+library(terra)
+library(tidyverse)
+library(sf)
+library(here)
+```
+
+
+# code to save the areas in all confidence levels and in all marine zones (summary tables) corrected in July 2025
+```{r}
+# Create output directory
+output_dir <- here("output_data", "Climate_MSP_Analysis_2024_Corrected")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# 1.  Create bbox in Albers
+bbox_albers <- st_bbox(c(xmin = 140.995, xmax = 153.005, ymin = -47.255, ymax = -38.995)) %>%
+  st_as_sfc() %>%
+  st_as_sf() %>%
+  st_set_crs(4326) %>%
+  st_transform(3577)
+
+#2. Load and process all required data
+
+
+maritime_boundaries_AU<- st_read(here("raw_data/AU_GA_SSLA-1973-AMB2014a_Maritime_boundaries_Australia/AU_GA_SSLA_1973_AMB2014a_ts_1990_poly.shp"))%>%
+ st_transform("EPSG:3577")%>%
+ st_make_valid()
+
+coastal_waters <- st_read(here("raw_data/Coastal_Waters_areas_(AMB2020)/Coastal_Waters_areas_(AMB2020).shp"))%>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+commonwealth_waters <- st_read(here("raw_data/Commonwealth_Marine_Regions/Commonwealth_Marine_Regions.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+terrestrial_areas <- st_read(here("raw_data/AustralianStates_SHP/STE_2021_AUST_GDA2020.shp")) %>%
+  st_transform("EPSG:3577")%>%
+  st_make_valid()
+
+# 3. Crop all layers to bbox
+
+terrestrial_areas_crop <- st_intersection(terrestrial_areas, bbox_albers)
+coastal_waters_crop <- st_intersection(coastal_waters, bbox_albers)
+commonwealth_crop <- st_intersection(commonwealth_waters, bbox_albers)
+maritime_boundaries_crop<-st_intersection(maritime_boundaries_AU,bbox_albers)
+
+
+state_waters<-st_difference(coastal_waters_crop, st_union(terrestrial_areas_crop))
+
+
+# 4. Create High Seas
+all_managed_waters_and_land <- bind_rows(
+  st_set_geometry(commonwealth_crop, "geometry") %>% mutate(zone_type = "Commonwealth"),
+  st_set_geometry(state_waters, "geometry") %>% mutate(zone_type = "State"),
+  st_set_geometry(terrestrial_areas_crop, "geometry") %>% mutate(zone_type = "terrestrial_areas")
+)
+
+high_seas <- st_difference(bbox_albers, st_union(all_managed_waters_and_land))
+
+# Define marine zones using the corrected approach
+marine_zones <- list(
+  "State Waters" = state_waters,
+  "Commonwealth Waters" = commonwealth_crop,
+  "High Seas" = high_seas
+)
+
+# Initialize results dataframe
+area_results_marine <- data.frame(
+  SSP = character(),
+  Decade = character(),
+  Pattern = character(),
+  Marine_Zone = character(),
+  No_Analog_km2 = numeric(),
+  Low_Confidence_km2 = numeric(),
+  Medium_Confidence_km2 = numeric(),
+  High_Confidence_km2 = numeric(),
+  Unsuitable_Constraints_km2 = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Define path to the combined MSP folder
+msp_folder <- here("output_data", "Climate_MSP_Constraints_2024")
+
+# Define patterns
+patterns <- c("suitable", "optimal")
+
+# Load the constraints raster
+constraints_path <- here("output_data", "Constraints_2024", "total_constraints.tif")
+constraints_raster <- rast(constraints_path)
+
+# Process each pattern (keeping your existing loop structure)
+for (pattern in patterns) {
+  cat("\nProcessing pattern:", pattern, "\n")
+  
+  # Get all combined MSP files for this pattern
+  pattern_folder <- file.path(msp_folder, pattern)
+  msp_files <- list.files(pattern_folder, pattern = "\\.tif$", full.names = TRUE)
+  
+  cat("Found", length(msp_files), "files for pattern:", pattern, "\n")
+  
+  for (msp_file in msp_files) {
+    tryCatch({
+      # Extract filename info (keeping your existing parsing)
+      msp_filename <- basename(msp_file)
+      cat("Processing file:", msp_filename, "\n")
+      
+      # Extract SSP and decade info from filename
+      parts <- strsplit(msp_filename, "_")[[1]]
+      ssp_idx <- which(grepl("^ssp", parts))[1]
+      ssp <- parts[ssp_idx]
+      decade_start <- parts[ssp_idx+1]
+      decade_end <- parts[ssp_idx+2]
+      decade_range <- paste(decade_start, decade_end, sep = "_")
+      
+      cat("SSP:", ssp, "- Decade:", decade_range, "\n")
+      
+      # Load MSP raster
+      msp_rast <- rast(msp_file)
+      
+      # Ensure projection is EPSG:3577
+      if (crs(msp_rast) != "EPSG:3577") {
+        msp_rast <- project(msp_rast, "EPSG:3577")
+      }
+      
+      # Create area raster
+      area_raster <- cellSize(msp_rast, unit = "m")
+      
+      # Calculate areas for each climate category (keeping your existing approach)
+      no_analog_area <- as.numeric(global(area_raster * (msp_rast == 0), sum, na.rm = TRUE)) / 1e6
+      low_conf_area <- as.numeric(global(area_raster * (msp_rast == 1), sum, na.rm = TRUE)) / 1e6
+      medium_conf_area <- as.numeric(global(area_raster * (msp_rast == 2), sum, na.rm = TRUE)) / 1e6
+      high_conf_area <- as.numeric(global(area_raster * (msp_rast == 3), sum, na.rm = TRUE)) / 1e6
+      
+      # Resample constraints to match MSP resolution
+      constraints_aligned <- resample(constraints_raster, msp_rast)
+      
+      # Create constraint-unsuitable mask
+      constraint_mask <- (constraints_aligned == 0 | is.na(constraints_aligned))
+      constraint_mask[is.na(constraint_mask)] <- FALSE
+      
+      # Calculate constraint-unsuitable area
+      constraint_area <- as.numeric(global(area_raster * constraint_mask, sum, na.rm = TRUE)) / 1e6
+      
+      cat("Total suitable area (km²):", no_analog_area + low_conf_area + medium_conf_area + high_conf_area, "\n")
+      cat("Areas by category (km²):\n")
+      cat("  No Analog:", no_analog_area, "\n")
+      cat("  Low Confidence:", low_conf_area, "\n")
+      cat("  Medium Confidence:", medium_conf_area, "\n")
+      cat("  High Confidence:", high_conf_area, "\n")
+      cat("  Unsuitable (Constraints):", constraint_area, "\n")
+      
+      # Process each marine zone using the pre-defined polygons
+      for (zone_name in names(marine_zones)) {
+        zone_vect <- vect(marine_zones[[zone_name]])
+        
+        # Mask all rasters with the zone
+        zone_msp <- mask(msp_rast, zone_vect)
+        zone_area <- mask(area_raster, zone_vect)
+        zone_constraint <- mask(constraint_mask, zone_vect)
+        
+        # Calculate areas by category
+        zone_no_analog <- as.numeric(global(zone_area * (zone_msp == 0), sum, na.rm = TRUE)) / 1e6
+        zone_low_conf <- as.numeric(global(zone_area * (zone_msp == 1), sum, na.rm = TRUE)) / 1e6
+        zone_medium_conf <- as.numeric(global(zone_area * (zone_msp == 2), sum, na.rm = TRUE)) / 1e6
+        zone_high_conf <- as.numeric(global(zone_area * (zone_msp == 3), sum, na.rm = TRUE)) / 1e6
+        zone_constraint_area <- as.numeric(global(zone_area * zone_constraint, sum, na.rm = TRUE)) / 1e6
+        
+        # Replace NAs with 0
+        zone_no_analog <- ifelse(is.na(zone_no_analog), 0, zone_no_analog)
+        zone_low_conf <- ifelse(is.na(zone_low_conf), 0, zone_low_conf)
+        zone_medium_conf <- ifelse(is.na(zone_medium_conf), 0, zone_medium_conf)
+        zone_high_conf <- ifelse(is.na(zone_high_conf), 0, zone_high_conf)
+        zone_constraint_area <- ifelse(is.na(zone_constraint_area), 0, zone_constraint_area)
+        
+        # Add to results
+        area_results_marine <- rbind(area_results_marine, data.frame(
+          SSP = ssp,
+          Decade = decade_range,
+          Pattern = pattern,
+          Marine_Zone = zone_name,
+          No_Analog_km2 = zone_no_analog,
+          Low_Confidence_km2 = zone_low_conf,
+          Medium_Confidence_km2 = zone_medium_conf,
+          High_Confidence_km2 = zone_high_conf,
+          Unsuitable_Constraints_km2 = zone_constraint_area
+        ))
+        
+        # Debug output for each zone
+        if (zone_name == "High Seas") {
+          cat("High Seas areas (km²) for", ssp, decade_range, pattern, ":\n")
+          cat("  No Analog:", zone_no_analog, "\n")
+          cat("  Low Confidence:", zone_low_conf, "\n")
+          cat("  Medium Confidence:", zone_medium_conf, "\n")
+          cat("  High Confidence:", zone_high_conf, "\n")
+          cat("  Unsuitable (Constraints):", zone_constraint_area, "\n")
+        }
+      }
+      
+      # Save intermediate results
+      write.csv(area_results_marine, 
+                file.path(output_dir, "area_results_marine_zones_with_constraints_CORRECTED.csv"), 
+                row.names = FALSE)
+      
+    }, error = function(e) {
+      cat("ERROR processing file:", msp_file, "\n")
+      cat("Error message:", e$message, "\n")
+    })
+  }
+}
+
+# Create summary and visualizations
+if (nrow(area_results_marine) > 0) {
+  # Create summary table
+  summary_table <- area_results_marine %>%
+    group_by(SSP, Decade, Pattern, Marine_Zone) %>%
+    summarise(
+      Total_Area_km2 = sum(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+                         High_Confidence_km2, Unsuitable_Constraints_km2, na.rm = TRUE),
+      No_Analog_pct = No_Analog_km2 / Total_Area_km2 * 100,
+      Low_Confidence_pct = Low_Confidence_km2 / Total_Area_km2 * 100,
+      Medium_Confidence_pct = Medium_Confidence_km2 / Total_Area_km2 * 100,
+      High_Confidence_pct = High_Confidence_km2 / Total_Area_km2 * 100,
+      Unsuitable_Constraints_pct = Unsuitable_Constraints_km2 / Total_Area_km2 * 100,
+      .groups = "drop"
+    )
+  
+  # Save summary table
+  write.csv(summary_table, 
+            file.path(output_dir, "summary_marine_zones_with_constraints_CORRECTED.csv"), 
+            row.names = FALSE)
+  
+  cat("Analysis complete. Results saved to:", output_dir, "\n")
+ 
+}
+```
+
+#plots
+```{r}
+# Load required packages
+library(tidyverse)
+library(viridis)
+library(ggplot2)
+library(patchwork)
+library(here)
+
+# Load the CORRECTED results data
+results_path <- file.path(output_dir, "area_results_marine_zones_with_constraints_CORRECTED.csv")
+area_results <- read.csv(results_path)
+
+# Create output directory for corrected plots
+plots_dir <- file.path(output_dir, "plots")
+dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Set a consistent theme for all plots
+my_theme <- theme_minimal() +
+  theme(
+    text = element_text(family = "sans", size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 11),
+    strip.text = element_text(face = "bold")
+  )
+
+# Calculate the sum of suitable (low + medium + high confidence) areas
+area_results <- area_results %>%
+  mutate(
+    Climate_Suitable_km2 = Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2
+  )
+
+# 1. RECREATE ORIGINAL PLOTS FROM YOUR CODE
+# Create plots for each SSP and pattern (matching your original structure)
+for (curr_ssp in unique(area_results$SSP)) {
+  for (curr_pattern in unique(area_results$Pattern)) {
+    # Filter data
+    plot_data <- area_results %>%
+      filter(SSP == curr_ssp, Pattern == curr_pattern) %>%
+      pivot_longer(
+        cols = c(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+               High_Confidence_km2, Unsuitable_Constraints_km2),
+        names_to = "Category",
+        values_to = "Area_km2"
+      ) %>%
+      mutate(
+        Category = case_when(
+          Category == "No_Analog_km2" ~ "No Analog",
+          Category == "Low_Confidence_km2" ~ "Low Confidence",
+          Category == "Medium_Confidence_km2" ~ "Medium Confidence",
+          Category == "High_Confidence_km2" ~ "High Confidence",
+          Category == "Unsuitable_Constraints_km2" ~ "Unsuitable (Constraints)",
+          TRUE ~ Category
+        ),
+        Category = factor(Category, levels = c(
+          "High Confidence", "Medium Confidence", "Low Confidence", 
+          "No Analog", "Unsuitable (Constraints)"
+        ))
+      )
+    
+    # Create area plot (matching your original)
+    p <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "stack") +
+      facet_wrap(~Marine_Zone, scales = "free_y") +
+      scale_fill_viridis(discrete = TRUE, direction = -1) +
+      labs(
+        title = paste("Area by Climate Suitability and Constraints -", 
+                     curr_ssp, "-", curr_pattern),
+        x = "Time Period",
+        y = expression("Area (km"^2*")"),
+        fill = "Category"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom"
+      )
+    
+    # Save plot
+    ggsave(
+      file.path(plots_dir, paste0("area_plot_", curr_ssp, "_", curr_pattern, ".png")),
+      p, width = 10, height = 8, dpi = 300
+    )
+    
+    # Create percentage plot (matching your original)
+    p_pct <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "fill") +
+      facet_wrap(~Marine_Zone) +
+      scale_fill_viridis(discrete = TRUE, direction = -1) +
+      scale_y_continuous(labels = scales::percent) +
+      labs(
+        title = paste("Percentage by Climate Suitability and Constraints -", 
+                     curr_ssp, "-", curr_pattern),
+        x = "Time Period",
+        y = "Percentage",
+        fill = "Category"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom"
+      )
+    
+    # Save percentage plot
+    ggsave(
+      file.path(plots_dir, paste0("area_plot_pct_", curr_ssp, "_", curr_pattern, ".png")),
+      p_pct, width = 10, height = 8, dpi = 300
+    )
+  }
+}
+
+# 2. RECREATE HIGH CONFIDENCE TREND PLOTS
+for (curr_pattern in unique(area_results$Pattern)) {
+  for (curr_ssp in unique(area_results$SSP)) {
+    # Filter data
+    high_conf_data <- area_results %>%
+      filter(Pattern == curr_pattern, SSP == curr_ssp) %>%
+      mutate(Decade_num = as.numeric(substr(gsub("_.*", "", Decade), 1, 4))) %>%
+      arrange(Decade_num) %>%
+      mutate(Decade = factor(Decade, levels = unique(Decade)))
+    
+    # Trend line plot
+    p1 <- ggplot(high_conf_data, aes(x = Decade, y = High_Confidence_km2, 
+                                   group = Marine_Zone, color = Marine_Zone)) +
+      geom_line(size = 1.2) +
+      geom_point(size = 3) +
+      scale_color_viridis_d() +
+      labs(
+        title = paste("High Confidence Areas Through Time -", curr_ssp, "-", curr_pattern),
+        subtitle = "Tracking potential aquaculture suitability across decades",
+        x = "Time Period",
+        y = expression("Area (km"^2*")"),
+        color = "Marine Zone"
+      ) +
+      my_theme
+    
+    # Save the plot
+    ggsave(
+      file.path(plots_dir, paste0("high_confidence_trend_", curr_ssp, "_", curr_pattern, ".png")),
+      p1, width = 10, height = 6, dpi = 300
+    )
+  }
+}
+
+# 3. RECREATE CONSTRAINT OVERLAY PLOTS
+for (curr_zone in unique(area_results$Marine_Zone)) {
+  # First check if there's any data
+  zone_data <- area_results %>% 
+    filter(Marine_Zone == curr_zone)
+  
+  if (nrow(zone_data) == 0) next
+  
+  # Get the constraint area - should be the same for all decades since constraints don't change
+  constraint_area <- zone_data %>%
+    group_by(Pattern) %>%
+    summarize(
+      Avg_Constraint_Area = mean(Unsuitable_Constraints_km2, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Prepare data for plotting
+  plot_data <- zone_data %>%
+    select(SSP, Decade, Pattern, Climate_Suitable_km2) %>%
+    # Convert to numeric decade for proper ordering
+    mutate(Decade_num = as.numeric(gsub("_.*", "", Decade))) %>%
+    arrange(Decade_num) %>%
+    # Create a factor with proper ordering
+    mutate(Decade = factor(Decade, levels = unique(Decade)))
+  
+  # Create the plot
+  p <- ggplot(plot_data, aes(x = Decade, y = Climate_Suitable_km2, fill = Pattern)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+    geom_hline(
+      data = constraint_area,
+      aes(yintercept = Avg_Constraint_Area, linetype = Pattern),
+      color = "red", size = 1.2
+    ) +
+    facet_wrap(~SSP, scales = "free_y") +
+    scale_fill_manual(
+      values = c("suitable" = "#21918c", "optimal" = "#440154"),
+      labels = c("suitable" = "Suitable Pattern", "optimal" = "Optimal Pattern"),
+      name = "Pattern"
+    ) +
+    scale_linetype_manual(
+      values = c("suitable" = "solid", "optimal" = "dashed"),
+      labels = c(
+        "suitable" = "Constraint-Unsuitable Area (Suitable Pattern)",
+        "optimal" = "Constraint-Unsuitable Area (Optimal Pattern)"
+      ),
+      name = "Constraints"
+    ) +
+    labs(
+      title = paste0("Climate-Suitable Areas with Constraint Reference\n", curr_zone),
+      subtitle = "Red lines show the constant constraint-unsuitable area",
+      x = "Time Period",
+      y = expression("Area (km"^2*")")
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 14),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.text = element_text(face = "bold"),
+      panel.grid.major = element_line(color = "gray90"),
+      panel.grid.minor = element_blank()
+    )
+  
+  # Save the plot
+  filename <- paste0("climate_vs_constraints_", gsub(" ", "_", curr_zone), ".png")
+  ggsave(
+    file.path(plots_dir, filename),
+    p, width = 12, height = 8, dpi = 300
+  )
+}
+
+# 4. RECREATE STACKED BAR CHARTS
+for (curr_pattern in unique(area_results$Pattern)) {
+  for (curr_ssp in unique(area_results$SSP)) {
+    # Prepare data - aggregate across all zones
+    plot_data <- area_results %>%
+      filter(Pattern == curr_pattern, SSP == curr_ssp) %>%
+      group_by(Decade, Marine_Zone) %>%
+      summarize(
+        Climate_Suitable_km2 = sum(Climate_Suitable_km2, na.rm = TRUE),
+        Unsuitable_Constraints_km2 = sum(Unsuitable_Constraints_km2, na.rm = TRUE),
+        No_Analog_km2 = sum(No_Analog_km2, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      # Convert to long format
+      pivot_longer(
+        cols = c(Climate_Suitable_km2, Unsuitable_Constraints_km2, No_Analog_km2),
+        names_to = "Category",
+        values_to = "Area_km2"
+      ) %>%
+      mutate(
+        Category = case_when(
+          Category == "Climate_Suitable_km2" ~ "Climate Suitable",
+          Category == "Unsuitable_Constraints_km2" ~ "Constraint-Unsuitable",
+          Category == "No_Analog_km2" ~ "No Climate Analog",
+          TRUE ~ Category
+        ),
+        # Order categories for stacking
+        Category = factor(Category, levels = c(
+          "Climate Suitable", "No Climate Analog", "Constraint-Unsuitable"
+        )),
+        # Convert to numeric decade for proper ordering
+        Decade_num = as.numeric(gsub("_.*", "", Decade))
+      ) %>%
+      arrange(Decade_num) %>%
+      # Create factor for proper ordering
+      mutate(Decade = factor(Decade, levels = unique(Decade)))
+    
+    # Create stacked bar chart
+    p <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "stack") +
+      facet_wrap(~Marine_Zone, scales = "free_y") +
+      scale_fill_manual(
+        values = c(
+          "Climate Suitable" = "#21918c",
+          "No Climate Analog" = "#440154",
+          "Constraint-Unsuitable" = "#fde725"
+        ),
+        name = "Category"
+      ) +
+      labs(
+        title = paste0("Area Breakdown by Category\n", curr_ssp, " - ", curr_pattern, " Pattern"),
+        subtitle = "Note: Constraint-Unsuitable area is constant over time",
+        x = "Time Period",
+        y = expression("Area (km"^2*")")
+      ) +
+      theme_minimal() +
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(face = "bold")
+      )
+    
+    # Save the plot
+    filename <- paste0("stacked_bar_", curr_ssp, "_", curr_pattern, ".png")
+    ggsave(
+      file.path(plots_dir, filename),
+      p, width = 12, height = 8, dpi = 300
+    )
+  }
+}
+
+# 5. RECREATE CONSTRAINT IMPACT ANALYSIS
+# Calculate constraint-unsuitable area by marine zone
+constraint_area_by_zone <- area_results %>%
+  # Group by marine zone and pattern
+  group_by(Marine_Zone, Pattern) %>%
+  # Calculate average constraint area (should be constant across time periods)
+  summarize(
+    Constraint_Unsuitable_km2 = mean(Unsuitable_Constraints_km2, na.rm = TRUE),
+    # Check if it's truly constant by calculating standard deviation
+    Constraint_StdDev = sd(Unsuitable_Constraints_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Order by marine zone
+  arrange(Marine_Zone, Pattern)
+
+# Save constraint area summary
+write.csv(constraint_area_by_zone, 
+          file.path(plots_dir, "constraint_area_by_zone_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Create constraint area plot
+constraint_plot <- ggplot(constraint_area_by_zone, 
+                       aes(x = Marine_Zone, y = Constraint_Unsuitable_km2, fill = Pattern)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  scale_fill_viridis_d(
+    labels = c("optimal" = "Optimal Pattern", "suitable" = "Suitable Pattern"),
+    end = 0.8
+  ) +
+  labs(
+    title = "Area Unsuitable Due to Constraints by Marine Zone",
+    subtitle = "Comparing optimal and suitable patterns",
+    x = "",
+    y = expression("Area (km"^2*")"),
+    fill = "Pattern"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  )
+
+# Save the constraint plot
+ggsave(
+  file.path(plots_dir, "constraint_area_by_zone_plot_CORRECTED.png"),
+  constraint_plot, width = 10, height = 6, dpi = 300
+)
+
+# 6. RECREATE NET AVAILABILITY HEATMAP
+# Calculate net availability
+net_availability <- area_results %>%
+  mutate(
+    # Calculate net availability (can be negative if constraints > high confidence)
+    Net_Available_km2 = High_Confidence_km2 - Unsuitable_Constraints_km2,
+    # Convert to percentage of total zone area
+    Total_Zone_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + 
+                         High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Net_Available_Pct = Net_Available_km2 / Total_Zone_Area_km2 * 100,
+    # Add categorical variable for easier interpretation
+    Availability_Status = case_when(
+      Net_Available_km2 > 0 ~ "Net Positive",
+      Net_Available_km2 < 0 ~ "Net Negative",
+      TRUE ~ "Neutral"
+    )
+  )
+
+# Save net availability analysis
+write.csv(net_availability, 
+          file.path(plots_dir, "net_availability_analysis_CORRECTED.csv"), 
+          row.names = FALSE)
+          
+```
+
+
+#make figures and summaries
+```{r}
+# Load required packages
+library(tidyverse)
+library(viridis)
+library(ggplot2)
+library(patchwork)
+library(here)
+
+# Load the CORRECTED results data
+results_path <- file.path(output_dir, "area_results_marine_zones_with_constraints_CORRECTED.csv")
+area_results <- read.csv(results_path)
+
+# Create output directory for corrected plots
+plots_dir <- file.path(output_dir, "plots")
+dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Set a consistent theme for all plots
+my_theme <- theme_minimal() +
+  theme(
+    text = element_text(family = "sans", size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 11),
+    strip.text = element_text(face = "bold")
+  )
+
+# Calculate the sum of suitable (low + medium + high confidence) areas
+area_results <- area_results %>%
+  mutate(
+    Climate_Suitable_km2 = Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2
+  )
+
+# 1. RECREATE ORIGINAL PLOTS FROM YOUR CODE
+# Create plots for each SSP and pattern (matching your original structure)
+for (curr_ssp in unique(area_results$SSP)) {
+  for (curr_pattern in unique(area_results$Pattern)) {
+    # Filter data
+    plot_data <- area_results %>%
+      filter(SSP == curr_ssp, Pattern == curr_pattern) %>%
+      pivot_longer(
+        cols = c(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+               High_Confidence_km2, Unsuitable_Constraints_km2),
+        names_to = "Category",
+        values_to = "Area_km2"
+      ) %>%
+      mutate(
+        Category = case_when(
+          Category == "No_Analog_km2" ~ "No Analog",
+          Category == "Low_Confidence_km2" ~ "Low Confidence",
+          Category == "Medium_Confidence_km2" ~ "Medium Confidence",
+          Category == "High_Confidence_km2" ~ "High Confidence",
+          Category == "Unsuitable_Constraints_km2" ~ "Unsuitable (Constraints)",
+          TRUE ~ Category
+        ),
+        Category = factor(Category, levels = c(
+          "High Confidence", "Medium Confidence", "Low Confidence", 
+          "No Analog", "Unsuitable (Constraints)"
+        ))
+      )
+    
+    # Create area plot (matching your original)
+    p <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "stack") +
+      facet_wrap(~Marine_Zone, scales = "free_y") +
+      scale_fill_viridis(discrete = TRUE, direction = -1) +
+      labs(
+        title = paste("Area by Climate Suitability and Constraints -", 
+                     curr_ssp, "-", curr_pattern),
+        x = "Time Period",
+        y = expression("Area (km"^2*")"),
+        fill = "Category"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom"
+      )
+    
+    # Save plot
+    ggsave(
+      file.path(plots_dir, paste0("area_plot_", curr_ssp, "_", curr_pattern, ".png")),
+      p, width = 10, height = 8, dpi = 300
+    )
+    
+    # Create percentage plot (matching your original)
+    p_pct <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "fill") +
+      facet_wrap(~Marine_Zone) +
+      scale_fill_viridis(discrete = TRUE, direction = -1) +
+      scale_y_continuous(labels = scales::percent) +
+      labs(
+        title = paste("Percentage by Climate Suitability and Constraints -", 
+                     curr_ssp, "-", curr_pattern),
+        x = "Time Period",
+        y = "Percentage",
+        fill = "Category"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom"
+      )
+    
+    # Save percentage plot
+    ggsave(
+      file.path(plots_dir, paste0("area_plot_pct_", curr_ssp, "_", curr_pattern, ".png")),
+      p_pct, width = 10, height = 8, dpi = 300
+    )
+  }
+}
+
+# 2. RECREATE HIGH CONFIDENCE TREND PLOTS
+for (curr_pattern in unique(area_results$Pattern)) {
+  for (curr_ssp in unique(area_results$SSP)) {
+    # Filter data
+    high_conf_data <- area_results %>%
+      filter(Pattern == curr_pattern, SSP == curr_ssp) %>%
+      mutate(Decade_num = as.numeric(substr(gsub("_.*", "", Decade), 1, 4))) %>%
+      arrange(Decade_num) %>%
+      mutate(Decade = factor(Decade, levels = unique(Decade)))
+    
+    # Trend line plot
+    p1 <- ggplot(high_conf_data, aes(x = Decade, y = High_Confidence_km2, 
+                                   group = Marine_Zone, color = Marine_Zone)) +
+      geom_line(size = 1.2) +
+      geom_point(size = 3) +
+      scale_color_viridis_d() +
+      labs(
+        title = paste("High Confidence Areas Through Time -", curr_ssp, "-", curr_pattern),
+        subtitle = "Tracking potential aquaculture suitability across decades",
+        x = "Time Period",
+        y = expression("Area (km"^2*")"),
+        color = "Marine Zone"
+      ) +
+      my_theme
+    
+    # Save the plot
+    ggsave(
+      file.path(plots_dir, paste0("high_confidence_trend_", curr_ssp, "_", curr_pattern, ".png")),
+      p1, width = 10, height = 6, dpi = 300
+    )
+  }
+}
+
+# 3. RECREATE CONSTRAINT OVERLAY PLOTS
+for (curr_zone in unique(area_results$Marine_Zone)) {
+  # First check if there's any data
+  zone_data <- area_results %>% 
+    filter(Marine_Zone == curr_zone)
+  
+  if (nrow(zone_data) == 0) next
+  
+  # Get the constraint area - should be the same for all decades since constraints don't change
+  constraint_area <- zone_data %>%
+    group_by(Pattern) %>%
+    summarize(
+      Avg_Constraint_Area = mean(Unsuitable_Constraints_km2, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Prepare data for plotting
+  plot_data <- zone_data %>%
+    select(SSP, Decade, Pattern, Climate_Suitable_km2) %>%
+    # Convert to numeric decade for proper ordering
+    mutate(Decade_num = as.numeric(gsub("_.*", "", Decade))) %>%
+    arrange(Decade_num) %>%
+    # Create a factor with proper ordering
+    mutate(Decade = factor(Decade, levels = unique(Decade)))
+  
+  # Create the plot
+  p <- ggplot(plot_data, aes(x = Decade, y = Climate_Suitable_km2, fill = Pattern)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+    geom_hline(
+      data = constraint_area,
+      aes(yintercept = Avg_Constraint_Area, linetype = Pattern),
+      color = "red", size = 1.2
+    ) +
+    facet_wrap(~SSP, scales = "free_y") +
+    scale_fill_manual(
+      values = c("suitable" = "#21918c", "optimal" = "#440154"),
+      labels = c("suitable" = "Suitable Pattern", "optimal" = "Optimal Pattern"),
+      name = "Pattern"
+    ) +
+    scale_linetype_manual(
+      values = c("suitable" = "solid", "optimal" = "dashed"),
+      labels = c(
+        "suitable" = "Constraint-Unsuitable Area (Suitable Pattern)",
+        "optimal" = "Constraint-Unsuitable Area (Optimal Pattern)"
+      ),
+      name = "Constraints"
+    ) +
+    labs(
+      title = paste0("Climate-Suitable Areas with Constraint Reference\n", curr_zone),
+      subtitle = "Red lines show the constant constraint-unsuitable area",
+      x = "Time Period",
+      y = expression("Area (km"^2*")")
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 14),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.text = element_text(face = "bold"),
+      panel.grid.major = element_line(color = "gray90"),
+      panel.grid.minor = element_blank()
+    )
+  
+  # Save the plot
+  filename <- paste0("climate_vs_constraints_", gsub(" ", "_", curr_zone), ".png")
+  ggsave(
+    file.path(plots_dir, filename),
+    p, width = 12, height = 8, dpi = 300
+  )
+}
+
+# 4. RECREATE STACKED BAR CHARTS
+for (curr_pattern in unique(area_results$Pattern)) {
+  for (curr_ssp in unique(area_results$SSP)) {
+    # Prepare data - aggregate across all zones
+    plot_data <- area_results %>%
+      filter(Pattern == curr_pattern, SSP == curr_ssp) %>%
+      group_by(Decade, Marine_Zone) %>%
+      summarize(
+        Climate_Suitable_km2 = sum(Climate_Suitable_km2, na.rm = TRUE),
+        Unsuitable_Constraints_km2 = sum(Unsuitable_Constraints_km2, na.rm = TRUE),
+        No_Analog_km2 = sum(No_Analog_km2, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      # Convert to long format
+      pivot_longer(
+        cols = c(Climate_Suitable_km2, Unsuitable_Constraints_km2, No_Analog_km2),
+        names_to = "Category",
+        values_to = "Area_km2"
+      ) %>%
+      mutate(
+        Category = case_when(
+          Category == "Climate_Suitable_km2" ~ "Climate Suitable",
+          Category == "Unsuitable_Constraints_km2" ~ "Constraint-Unsuitable",
+          Category == "No_Analog_km2" ~ "No Climate Analog",
+          TRUE ~ Category
+        ),
+        # Order categories for stacking
+        Category = factor(Category, levels = c(
+          "Climate Suitable", "No Climate Analog", "Constraint-Unsuitable"
+        )),
+        # Convert to numeric decade for proper ordering
+        Decade_num = as.numeric(gsub("_.*", "", Decade))
+      ) %>%
+      arrange(Decade_num) %>%
+      # Create factor for proper ordering
+      mutate(Decade = factor(Decade, levels = unique(Decade)))
+    
+    # Create stacked bar chart
+    p <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+      geom_bar(stat = "identity", position = "stack") +
+      facet_wrap(~Marine_Zone, scales = "free_y") +
+      scale_fill_manual(
+        values = c(
+          "Climate Suitable" = "#21918c",
+          "No Climate Analog" = "#440154",
+          "Constraint-Unsuitable" = "#fde725"
+        ),
+        name = "Category"
+      ) +
+      labs(
+        title = paste0("Area Breakdown by Category\n", curr_ssp, " - ", curr_pattern, " Pattern"),
+        subtitle = "Note: Constraint-Unsuitable area is constant over time",
+        x = "Time Period",
+        y = expression("Area (km"^2*")")
+      ) +
+      theme_minimal() +
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(face = "bold")
+      )
+    
+    # Save the plot
+    filename <- paste0("stacked_bar_", curr_ssp, "_", curr_pattern, ".png")
+    ggsave(
+      file.path(plots_dir, filename),
+      p, width = 12, height = 8, dpi = 300
+    )
+  }
+}
+
+# 5. RECREATE CONSTRAINT IMPACT ANALYSIS
+# Calculate constraint-unsuitable area by marine zone
+constraint_area_by_zone <- area_results %>%
+  # Group by marine zone and pattern
+  group_by(Marine_Zone, Pattern) %>%
+  # Calculate average constraint area (should be constant across time periods)
+  summarize(
+    Constraint_Unsuitable_km2 = mean(Unsuitable_Constraints_km2, na.rm = TRUE),
+    # Check if it's truly constant by calculating standard deviation
+    Constraint_StdDev = sd(Unsuitable_Constraints_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Order by marine zone
+  arrange(Marine_Zone, Pattern)
+
+# Save constraint area summary
+write.csv(constraint_area_by_zone, 
+          file.path(plots_dir, "constraint_area_by_zone_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Create constraint area plot
+constraint_plot <- ggplot(constraint_area_by_zone, 
+                       aes(x = Marine_Zone, y = Constraint_Unsuitable_km2, fill = Pattern)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  scale_fill_viridis_d(
+    labels = c("optimal" = "Optimal Pattern", "suitable" = "Suitable Pattern"),
+    end = 0.8
+  ) +
+  labs(
+    title = "Area Unsuitable Due to Constraints by Marine Zone",
+    subtitle = "Comparing optimal and suitable patterns",
+    x = "",
+    y = expression("Area (km"^2*")"),
+    fill = "Pattern"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  )
+
+# Save the constraint plot
+ggsave(
+  file.path(plots_dir, "constraint_area_by_zone_plot_CORRECTED.png"),
+  constraint_plot, width = 10, height = 6, dpi = 300
+)
+
+# 6. RECREATE NET AVAILABILITY HEATMAP
+# Calculate net availability
+net_availability <- area_results %>%
+  mutate(
+    # Calculate net availability (can be negative if constraints > high confidence)
+    Net_Available_km2 = High_Confidence_km2 - Unsuitable_Constraints_km2,
+    # Convert to percentage of total zone area
+    Total_Zone_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + 
+                         High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Net_Available_Pct = Net_Available_km2 / Total_Zone_Area_km2 * 100,
+    # Add categorical variable for easier interpretation
+    Availability_Status = case_when(
+      Net_Available_km2 > 0 ~ "Net Positive",
+      Net_Available_km2 < 0 ~ "Net Negative",
+      TRUE ~ "Neutral"
+    )
+  )
+
+# Save net availability analysis
+write.csv(net_availability, 
+          file.path(plots_dir, "net_availability_analysis_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Create heatmap of net availability
+p_heatmap <- ggplot(net_availability, 
+                  aes(x = Decade, y = Marine_Zone, fill = Net_Available_Pct)) +
+  geom_tile() +
+  # Use a diverging color palette centered at zero
+  scale_fill_gradient2(
+    low = "#d73027", 
+    mid = "#f7f7f7", 
+    high = "#1a9850", 
+    midpoint = 0,
+    name = "Net Available (%)"
+  ) +
+  # Facet by SSP and Pattern
+  facet_grid(Pattern ~ SSP, labeller = labeller(
+    Pattern = c("optimal" = "Optimal Pattern", "suitable" = "Suitable Pattern")
+  )) +
+  labs(
+    title = "Net High Confidence Area Availability After Constraints",
+    subtitle = "Green = positive net availability, Red = negative (constraints exceed high confidence area)",
+    x = "Time Period",
+    y = "Marine Zone"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 8),
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Save the heatmap
+ggsave(
+  file.path(plots_dir, "net_availability_heatmap_CORRECTED.png"),
+  p_heatmap, width = 14, height = 10, dpi = 300
+)
+
+# 7. RECREATE TIPPING POINT ANALYSIS
+# Calculate tipping points
+tipping_point <- net_availability %>%
+  # Create indicators for availability status
+  mutate(
+    Is_Net_Negative = Net_Available_km2 < 0
+  ) %>%
+  # Group by marine zone, SSP, and pattern
+  group_by(Marine_Zone, SSP, Pattern) %>%
+  # Find the first decade where net availability becomes negative
+  summarize(
+    Tipping_Point_Decade = first(Decade[Is_Net_Negative]),
+    # If always positive, indicate "Never"
+    Tipping_Point_Decade = ifelse(is.na(Tipping_Point_Decade), "Never", Tipping_Point_Decade),
+    .groups = "drop"
+  ) %>%
+  # Order for better visualization
+  arrange(Marine_Zone, SSP, Pattern)
+
+# Save tipping point analysis
+write.csv(tipping_point, 
+          file.path(plots_dir, "tipping_point_analysis_CORRECTED.csv"), 
+          row.names = FALSE)
+
+# Create a factor for the decade to control the color order
+decade_order <- c("2021_2030", "2031_2040", "2041_2050", "2051_2060", 
+                 "2061_2070", "2071_2080", "2081_2090", "2091_2100", "Never")
+
+tipping_point$Tipping_Point_Decade <- factor(tipping_point$Tipping_Point_Decade, 
+                                           levels = decade_order)
+
+# Create tipping point visualization
+p_tipping <- ggplot(tipping_point, 
+                  aes(x = SSP, y = Marine_Zone, fill = Tipping_Point_Decade)) +
+  geom_tile() +
+  geom_text(aes(label = as.character(Tipping_Point_Decade)), 
+            color = "black", size = 3) +
+  facet_wrap(~Pattern, labeller = labeller(
+    Pattern = c("optimal" = "Optimal Pattern", "suitable" = "Suitable Pattern")
+  )) +
+  scale_fill_viridis_d() +
+  labs(
+    title = "Tipping Point Analysis: When Constraints Exceed High Confidence Area",
+    subtitle = "'Never' indicates high confidence area always exceeds constraints",
+    x = "Climate Scenario",
+    y = "Marine Zone",
+    fill = "Tipping Point\nDecade"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Save the tipping point visualization
+ggsave(
+  file.path(plots_dir, "tipping_point_visualization_CORRECTED.png"),
+  p_tipping, width = 12, height = 8, dpi = 300
+)
+
+# Generate an HTML report
+html_report <- paste0(
+  "<!DOCTYPE html>
+  <html>
+  <head>
+    <title>Marine Aquaculture Climate and Constraints Analysis - CORRECTED</title>
+    <style>
+      body {font-family: Arial, sans-serif; margin: 20px; max-width: 1200px; margin: 0 auto;}
+      h1 {color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px;}
+      h2 {color: #2c3e50; margin-top: 30px;}
+      .plot-container {margin: 20px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px;}
+      .plot-img {max-width: 100%; height: auto;}
+      .caption {font-style: italic; color: #555; margin-top: 5px;}
+      .section {margin-top: 40px;}
+    </style>
+  </head>
+  <body>
+    <h1>Marine Aquaculture Climate and Constraints Analysis</h1>
+    <p>This report presents visualizations of potential marine aquaculture areas based on climate suitability and spatial constraints, with corrected High Seas calculations.</p>
+    
+    <div class='section'>
+      <h2>Area Breakdown by Climate Suitability and Constraints</h2>
+      <p>These plots show the breakdown of areas by climate category and constraints across marine zones.</p>
+    </div>
+    
+    <div class='section'>
+      <h2>Net High Confidence Area Availability</h2>
+      <div class='plot-container'>
+        <img class='plot-img' src='net_availability_heatmap_CORRECTED.png' alt='Net Availability Heatmap'>
+        <p class='caption'>Net availability of high confidence areas after accounting for constraints.</p>
+      </div>
+    </div>
+    
+    <div class='section'>
+      <h2>Tipping Point Analysis</h2>
+      <div class='plot-container'>
+        <img class='plot-img' src='tipping_point_visualization_CORRECTED.png' alt='Tipping Point Analysis'>
+        <p class='caption'>When constraints start to exceed high confidence areas.</p>
+      </div>
+    </div>
+  </body>
+  </html>"
+)
+
+# Write the HTML report
+writeLines(html_report, file.path(plots_dir, "analysis_report_CORRECTED.html"))
+
+cat("All plots recreated with corrected data. Results saved to:", plots_dir, "\n")
+
+```
+
+#additional plots for the paper
+
+```{r}
+# Load required libraries
+library(here)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Read the CORRECTED dataset
+data2 <- read_csv(file.path(output_dir, "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+
+# Let's examine the structure of corrected data2
+print("Corrected Data2 structure:")
+print(head(data2))
+print("Unique columns in corrected data2:")
+print(colnames(data2))
+
+# Data preparation for corrected data2
+plot_data2 <- data2 %>%
+  # Clean up marine zone names for better display AND set factor order
+  mutate(
+    Marine_Zone_Clean = case_when(
+      Marine_Zone == "State Waters" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Set the factor order for Marine_Zone to control facet arrangement
+    Marine_Zone_Clean = factor(Marine_Zone_Clean, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    # Clean up SSP names
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    ),
+    # Create a year variable for x-axis (use decade midpoint for plotting)
+    Year = case_when(
+      Decade == "2021_2030" ~ 2025,
+      Decade == "2031_2040" ~ 2035,
+      Decade == "2041_2050" ~ 2045,
+      Decade == "2051_2060" ~ 2055,
+      Decade == "2061_2070" ~ 2065,
+      Decade == "2071_2080" ~ 2075,
+      Decade == "2081_2090" ~ 2085,
+      Decade == "2091_2100" ~ 2095,
+      TRUE ~ NA_real_
+    ),
+    # Calculate total area and constraint percentage
+    Total_Area_km2 = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    # Available area is High_Confidence (this should be the free area after constraints)
+    Free_Area_km2 = High_Confidence_km2,
+    # Constrained area
+    Constraint_Area_km2 = Unsuitable_Constraints_km2
+  ) %>%
+  select(SSP_clean, Year, Pattern, Marine_Zone_Clean, Free_Area_km2, Constraint_Area_km2, High_Confidence_km2, Total_Area_km2, Unsuitable_Constraints_km2)
+
+# Current aquaculture usage
+current_usage <- 25.88
+
+# Create the main plot using corrected data only
+p2_corrected <- ggplot(plot_data2, aes(x = Year)) +
+  # Show constraint area as ribbon from 0 to constraint level
+  geom_ribbon(aes(ymin = 0, ymax = Constraint_Area_km2), 
+              fill = "gray80", alpha = 0.7, 
+              data = plot_data2 %>% 
+                filter(Pattern == "suitable") %>%
+                group_by(Marine_Zone_Clean, Year) %>%
+                slice(1)) +  # Only show once per year per zone
+  
+  # Add lines for available area (High_Confidence) - dashed for suitable, solid for optimal
+  geom_line(aes(y = Free_Area_km2, color = SSP_clean, linetype = Pattern), size = 1) +
+  
+  # Add horizontal line for current aquaculture usage at 25.88 km²
+  geom_hline(yintercept = current_usage, 
+             color = "#E7298A", # Magenta from colorbrewer (colorblind-friendly)
+             linetype = "dotted", 
+             size = 0.8,
+             alpha = 0.9) +
+  
+  # Facet by marine zone (will now show in order: State Waters, Commonwealth Waters, High Seas)
+  facet_wrap(~ Marine_Zone_Clean, scales = "free_y", ncol = 1) +
+  
+  # Customize line types
+  scale_linetype_manual(values = c("optimal" = "solid", "suitable" = "dashed"),
+                       name = "Climate Analogue Type",
+                       labels = c("optimal" = "Optimal", "suitable" = "Suitable")) +
+  
+  # Customize colors for SSP scenarios using the same viridis colors as your reference plot
+  scale_color_manual(values = c("SSP1-1.9" = "#440154FF",   # Purple
+                               "SSP1-2.6" = "#31688EFF",    # Blue 
+                               "SSP2-4.5" = "#35B779FF",    # Teal/Green
+                               "SSP3-7.0" = "#90D743FF",    # Light Green
+                               "SSP5-8.5" = "#FDE725FF"),   # Yellow
+                    name = "SSP Scenario") +
+  
+  # Axis labels and title
+  labs(
+    x = "Decade",
+    y = expression("Area (km²)"),
+    title = "Climate Analogues: Available Area with Constraints",
+    subtitle = "Gray area = Constraints; Magenta dotted line = Current usage (25.88 km²)",
+    caption = "Solid lines = Optimal analogues, Dashed lines = Suitable analogues"
+  ) +
+  
+  # Theme customization
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    strip.text = element_text(size = 11, face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  
+  # Adjust x-axis to show decade labels properly
+  scale_x_continuous(breaks = seq(2025, 2095, 10),
+                    labels = c("2021-2030", "2031-2040", "2041-2050", "2051-2060", 
+                              "2061-2070", "2071-2080", "2081-2090", "2091-2100")) +
+  
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the corrected plot
+print(p2_corrected)
+
+# Show constraint levels summary for corrected data
+print("Constraint summary in corrected data (2021-2030, suitable pattern):")
+constraint_summary <- data2 %>%
+  filter(Decade == "2021_2030", Pattern == "suitable") %>%
+  mutate(
+    Marine_Zone_Clean = case_when(
+      Marine_Zone == "State Waters" ~ "State Waters",
+      Marine_Zone == "Commonwealth Waters" ~ "Commonwealth Waters", 
+      Marine_Zone == "High Seas" ~ "High Seas",
+      TRUE ~ Marine_Zone
+    ),
+    # Set the same factor order for consistency
+    Marine_Zone_Clean = factor(Marine_Zone_Clean, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+    Total_Area = No_Analog_km2 + Low_Confidence_km2 + Medium_Confidence_km2 + High_Confidence_km2 + Unsuitable_Constraints_km2,
+    Constraint_Percent = round((Unsuitable_Constraints_km2 / Total_Area) * 100, 1)
+  ) %>%
+  select(Marine_Zone_Clean, Unsuitable_Constraints_km2, High_Confidence_km2, Total_Area, Constraint_Percent) %>%
+  arrange(Marine_Zone_Clean)
+
+print(constraint_summary)
+
+# Show High Seas summary across all scenarios for context
+print("High Seas summary across scenarios (2021-2030):")
+high_seas_summary <- data2 %>%
+  filter(Marine_Zone == "High Seas", Decade == "2021_2030") %>%
+  mutate(
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5", 
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    )
+  ) %>%
+  select(SSP_clean, Pattern, High_Confidence_km2, Unsuitable_Constraints_km2) %>%
+  arrange(SSP_clean, Pattern)
+
+print(high_seas_summary)
+
+# Save corrected plots
+ggsave(file.path(plots_dir, "climate_analogues_constraints_CORRECTED.png"), 
+       plot = p2_corrected, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+ggsave(file.path(plots_dir, "climate_analogues_constraints_CORRECTED.pdf"), 
+       plot = p2_corrected, 
+       width = 12, 
+       height = 10, 
+       dpi = 300)
+
+print("Corrected plot saved to:", plots_dir)
+print("Files: climate_analogues_constraints_CORRECTED.png and .pdf")
+
+```
+
+#save some of the all confidence analogues with new colors
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(viridis)
+library(here)
+
+# Load the CORRECTED results data
+area_results <- read.csv(file.path(output_dir, "area_results_marine_zones_with_constraints_CORRECTED.csv"))
+
+# Create output directory for new colored plots
+plots_dir_new_colors <- file.path(output_dir, "plots_new_colors")
+dir.create(plots_dir_new_colors, recursive = TRUE, showWarnings = FALSE)
+
+# Define the new color scheme
+new_colors <- c(
+  "High Confidence" = "#2E4C6D",        # Dark blue for high confidence
+  "Medium Confidence" = "#35B779FF",     # Viridis green for medium confidence  
+  "Low Confidence" = "#31688EFF",        # Viridis blue for low confidence
+  "No Analog" = "#FDE725FF",             # Yellow for no analogues
+  "Unsuitable (Constraints)" = "#808080" # Grey for constraints
+)
+
+# Create a function to generate both area and percentage plots for each SSP-pattern combination
+create_combined_plots <- function(area_results, ssp, pattern) {
+  
+  # Filter and prepare data
+  plot_data <- area_results %>%
+    filter(SSP == ssp, Pattern == pattern) %>%
+    # Clean up marine zone names (they should already be correct now)
+    mutate(
+      Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas"))
+    ) %>%
+    # Convert to long format
+    pivot_longer(
+      cols = c(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+               High_Confidence_km2, Unsuitable_Constraints_km2),
+      names_to = "Category",
+      values_to = "Area_km2"
+    ) %>%
+    mutate(
+      Category = case_when(
+        Category == "No_Analog_km2" ~ "No Analog",
+        Category == "Low_Confidence_km2" ~ "Low Confidence",
+        Category == "Medium_Confidence_km2" ~ "Medium Confidence",
+        Category == "High_Confidence_km2" ~ "High Confidence",
+        Category == "Unsuitable_Constraints_km2" ~ "Unsuitable (Constraints)",
+        TRUE ~ Category
+      ),
+      # Set the order for stacking (bottom to top)
+      Category = factor(Category, levels = c(
+        "Unsuitable (Constraints)", "No Analog", "Low Confidence", 
+        "Medium Confidence", "High Confidence"
+      ))
+    )
+  
+  # Clean SSP name for title
+  ssp_clean <- case_when(
+    ssp == "ssp119" ~ "SSP1-1.9",
+    ssp == "ssp126" ~ "SSP1-2.6",
+    ssp == "ssp245" ~ "SSP2-4.5",
+    ssp == "ssp370" ~ "SSP3-7.0",
+    ssp == "ssp585" ~ "SSP5-8.5",
+    TRUE ~ ssp
+  )
+  
+  # Create area plot
+  p_area <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+    geom_bar(stat = "identity", position = "stack") +
+    facet_wrap(~Marine_Zone, scales = "free_y") +
+    scale_fill_manual(values = new_colors, name = "Category") +
+    labs(
+      title = paste("Area by Climate Suitability and Constraints -", ssp_clean, "-", pattern),
+      x = "Time Period",
+      y = expression("Area (km"^2*")"),
+      fill = "Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom",
+      plot.title = element_text(size = 12, face = "bold"),
+      strip.text = element_text(size = 10, face = "bold")
+    )
+  
+  # Create percentage plot
+  p_percentage <- ggplot(plot_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+    geom_bar(stat = "identity", position = "fill") +
+    facet_wrap(~Marine_Zone) +
+    scale_fill_manual(values = new_colors, name = "Category") +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(
+      title = paste("Percentage by Climate Suitability and Constraints -", ssp_clean, "-", pattern),
+      x = "Time Period",
+      y = "Percentage",
+      fill = "Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom",
+      plot.title = element_text(size = 12, face = "bold"),
+      strip.text = element_text(size = 10, face = "bold")
+    )
+  
+  # Combine plots using patchwork
+  combined_plot <- p_area / p_percentage +
+    plot_layout(guides = "collect") &
+    theme(legend.position = "bottom")
+  
+  # Save individual plots
+  ggsave(
+    file.path(plots_dir_new_colors, paste0("area_plot_new_colors_", ssp, "_", pattern, ".png")),
+    p_area, width = 12, height = 8, dpi = 300
+  )
+  
+  ggsave(
+    file.path(plots_dir_new_colors, paste0("percentage_plot_new_colors_", ssp, "_", pattern, ".png")),
+    p_percentage, width = 12, height = 8, dpi = 300
+  )
+  
+  # Save combined plot
+  ggsave(
+    file.path(plots_dir_new_colors, paste0("combined_plot_new_colors_", ssp, "_", pattern, ".png")),
+    combined_plot, width = 12, height = 16, dpi = 300
+  )
+  
+  return(combined_plot)
+}
+
+# Generate plots for all SSP and pattern combinations
+ssps <- unique(area_results$SSP)
+patterns <- unique(area_results$Pattern)
+
+cat("Creating plots with new color scheme...\n")
+
+for (ssp in ssps) {
+  for (pattern in patterns) {
+    cat("Processing:", ssp, "-", pattern, "\n")
+    combined_plot <- create_combined_plots(area_results, ssp, pattern)
+  }
+}
+
+# Create a summary comparison plot showing all SSPs for one pattern in a grid
+create_summary_comparison <- function(area_results, pattern_type) {
+  
+  # Prepare data for all SSPs
+  summary_data <- area_results %>%
+    filter(Pattern == pattern_type) %>%
+    mutate(
+      Marine_Zone = factor(Marine_Zone, levels = c("State Waters", "Commonwealth Waters", "High Seas")),
+      SSP_clean = case_when(
+        SSP == "ssp119" ~ "SSP1-1.9",
+        SSP == "ssp126" ~ "SSP1-2.6",
+        SSP == "ssp245" ~ "SSP2-4.5",
+        SSP == "ssp370" ~ "SSP3-7.0",
+        SSP == "ssp585" ~ "SSP5-8.5",
+        TRUE ~ SSP
+      )
+    ) %>%
+    pivot_longer(
+      cols = c(No_Analog_km2, Low_Confidence_km2, Medium_Confidence_km2, 
+               High_Confidence_km2, Unsuitable_Constraints_km2),
+      names_to = "Category",
+      values_to = "Area_km2"
+    ) %>%
+    mutate(
+      Category = case_when(
+        Category == "No_Analog_km2" ~ "No Analog",
+        Category == "Low_Confidence_km2" ~ "Low Confidence",
+        Category == "Medium_Confidence_km2" ~ "Medium Confidence",
+        Category == "High_Confidence_km2" ~ "High Confidence",
+        Category == "Unsuitable_Constraints_km2" ~ "Unsuitable (Constraints)",
+        TRUE ~ Category
+      ),
+      Category = factor(Category, levels = c(
+        "Unsuitable (Constraints)", "No Analog", "Low Confidence", 
+        "Medium Confidence", "High Confidence"
+      ))
+    )
+  
+  # Create area summary plot
+  p_summary_area <- ggplot(summary_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+    geom_bar(stat = "identity", position = "stack") +
+    facet_grid(Marine_Zone ~ SSP_clean, scales = "free_y") +
+    scale_fill_manual(values = new_colors, name = "Category") +
+    labs(
+      title = paste("Area Comparison Across All SSPs -", str_to_title(pattern_type), "Pattern"),
+      x = "Time Period",
+      y = expression("Area (km"^2*")"),
+      fill = "Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      legend.position = "bottom",
+      plot.title = element_text(size = 14, face = "bold"),
+      strip.text = element_text(size = 9, face = "bold")
+    )
+  
+  # Create percentage summary plot
+  p_summary_percentage <- ggplot(summary_data, aes(x = Decade, y = Area_km2, fill = Category)) +
+    geom_bar(stat = "identity", position = "fill") +
+    facet_grid(Marine_Zone ~ SSP_clean) +
+    scale_fill_manual(values = new_colors, name = "Category") +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(
+      title = paste("Percentage Comparison Across All SSPs -", str_to_title(pattern_type), "Pattern"),
+      x = "Time Period",
+      y = "Percentage",
+      fill = "Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      legend.position = "bottom",
+      plot.title = element_text(size = 14, face = "bold"),
+      strip.text = element_text(size = 9, face = "bold")
+    )
+  
+  # Save both summary plots
+  ggsave(
+    file.path(plots_dir_new_colors, paste0("summary_area_all_SSPs_", pattern_type, "_new_colors.png")),
+    p_summary_area, width = 16, height = 12, dpi = 300
+  )
+  
+  ggsave(
+    file.path(plots_dir_new_colors, paste0("summary_percentage_all_SSPs_", pattern_type, "_new_colors.png")),
+    p_summary_percentage, width = 16, height = 12, dpi = 300
+  )
+  
+  return(list(area = p_summary_area, percentage = p_summary_percentage))
+}
+
+# Create summary plots for both patterns
+cat("Creating summary comparison plots...\n")
+summary_suitable <- create_summary_comparison(area_results, "suitable")
+summary_optimal <- create_summary_comparison(area_results, "optimal")
+
+# Create a color scheme legend for reference
+create_color_legend <- function() {
+  legend_data <- data.frame(
+    Category = names(new_colors),
+    Value = 1,
+    Description = c(
+      "High confidence climate analogues",
+      "Medium confidence climate analogues", 
+      "Low confidence climate analogues",
+      "No climate analogues",
+      "Unsuitable due to constraints"
+    )
+  ) %>%
+  mutate(
+    Category = factor(Category, levels = c(
+      "High Confidence", "Medium Confidence", "Low Confidence", 
+      "No Analog", "Unsuitable (Constraints)"
+    ))
+  )
+  
+  p_legend <- ggplot(legend_data, aes(x = Category, y = Value, fill = Category)) +
+    geom_col() +
+    scale_fill_manual(values = new_colors, guide = "none") +
+    coord_flip() +
+    labs(
+      title = "Color Scheme Reference",
+      subtitle = "New color mapping for marine zone analysis",
+      x = "",
+      y = ""
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(size = 14, face = "bold")
+    ) +
+    annotate("text", x = 5, y = 0.5, label = "High confidence\nclimate analogues", size = 3, hjust = 0) +
+    annotate("text", x = 4, y = 0.5, label = "Medium confidence\nclimate analogues", size = 3, hjust = 0) +
+    annotate("text", x = 3, y = 0.5, label = "Low confidence\nclimate analogues", size = 3, hjust = 0) +
+    annotate("text", x = 2, y = 0.5, label = "No climate\nanalogues", size = 3, hjust = 0) +
+    annotate("text", x = 1, y = 0.5, label = "Unsuitable due\nto constraints", size = 3, hjust = 0)
+  
+  ggsave(
+    file.path(plots_dir_new_colors, "color_scheme_reference.png"),
+    p_legend, width = 8, height = 6, dpi = 300
+  )
+  
+  return(p_legend)
+}
+
+# Create the color reference
+cat("Creating color scheme reference...\n")
+color_legend <- create_color_legend()
+
+# Create an analysis summary
+analysis_summary <- area_results %>%
+  group_by(SSP, Pattern, Marine_Zone) %>%
+  summarise(
+    Mean_High_Confidence = mean(High_Confidence_km2, na.rm = TRUE),
+    Mean_Constraints = mean(Unsuitable_Constraints_km2, na.rm = TRUE),
+    Mean_No_Analog = mean(No_Analog_km2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    SSP_clean = case_when(
+      SSP == "ssp119" ~ "SSP1-1.9",
+      SSP == "ssp126" ~ "SSP1-2.6",
+      SSP == "ssp245" ~ "SSP2-4.5",
+      SSP == "ssp370" ~ "SSP3-7.0",
+      SSP == "ssp585" ~ "SSP5-8.5",
+      TRUE ~ SSP
+    )
+  )
+
+# Save the analysis summary
+write.csv(analysis_summary, 
+          file.path(plots_dir_new_colors, "analysis_summary_new_colors.csv"), 
+          row.names = FALSE)
+
+cat("All plots created with new color scheme!\n")
+cat("Files saved to:", plots_dir_new_colors, "\n")
+cat("\nColor scheme used:\n")
+for(i in 1:length(new_colors)) {
+  cat("  ", names(new_colors)[i], ":", new_colors[i], "\n")
+}
+
+```
+
+#go to 17_km2_fold_area_available_marine_territory_over_time_EF_Oct25
