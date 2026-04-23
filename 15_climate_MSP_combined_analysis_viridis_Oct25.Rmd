@@ -1306,6 +1306,6 @@ cat("Clean composites saved in:", output_folder, "\n")
 
 ```
 
-# Go to code 16_km2_area_climate_and_constraints_plots_EF_Oct25
+# Go to code 16_km2_area_climate_and_constraints_plots_Oct25
 
 
