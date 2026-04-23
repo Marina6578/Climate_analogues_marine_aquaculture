@@ -1,12 +1,12 @@
 # Climate_analogues_marine_aquaculture
 
-This repository is related to the Manuscript sent to Earth's Future for Publication with the title: Title: Climate analogues as a tool for marine aquaculture planning and adaptation
+This repository is related to the Manuscript sent for Publication with the title: Title: Climate analogues as a tool for marine aquaculture planning and adaptation
 
 Authors: Marina Christofidis, David Schoeman, Jeremy Harte, Vanessa Adams, Jackson Stockbridge, Caitlin D. Kuempel
 
 Marina Christofidis 1,2 David Schoeman 3,4 Jeremy Harte 1 Vanessa Adams 5,6 Jackson Stockbridge 1 Caitlin D. Kuempel 1
 
-Affiliations: 1 School of Environment and Science, Australian Rivers Institute, Griffith University, Nathan, QLD, Australia 2 Ministry of Management and Innovation in Public Services (MGI), Brazilian Federal Government, Brasilia, Brazil. 3 Ocean Futures Research Cluster, School of Science, Technology, and Engineering,University of the Sunshine Coast, Maroochydore, Queensland, Australia 4 Centre for African Conservation Ecology, Department of Zoology, Nelson Mandela University, Gqeberha, South Africa 5 School of Geography, Planning, and Spatial Sciences, University of Tasmania, Hobart, TAS, Australia 6 Centre for Marine Socioecology, University of Tasmania, Hobart, Australia
+Affiliations: 1 School of Environment and Science, Australian Rivers Institute, Griffith University, Nathan, QLD, Australia 2 Ministry of Management and Innovation in Public Services (MGI), Brazilian Federal Government, Brasilia, Brazil. 3 Ocean Futures Research Cluster, School of Science, Technology, and Engineering, University of the Sunshine Coast, Maroochydore, Queensland, Australia 4 Centre for African Conservation Ecology, Department of Zoology, Nelson Mandela University, Gqeberha, South Africa 5 School of Geography, Planning, and Spatial Sciences, University of Tasmania, Hobart, TAS, Australia 6 Centre for Marine Socioecology, University of Tasmania, Hobart, Australia
 
 Corresponding author: Marina Christofidis marina.christofidis@griffithuni.edu.au marina.christofidis@gmail.com
 
