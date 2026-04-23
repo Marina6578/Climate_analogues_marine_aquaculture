@@ -2,7 +2,7 @@
 	# For working with CMIP6 netCDFs
 
 # Written by Dave Schoeman (david.schoeman@gmail.com)
-	# March-May 2022; modified October 20023
+	# March-May 2022; modified October 2023
 
 
 # Packages ---------------------------------------------------------------------
