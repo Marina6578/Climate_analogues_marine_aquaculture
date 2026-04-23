@@ -223,4 +223,4 @@ for (i in seq_along(ssps)) {
 
 ```
 
-# go to 10_B_projection_ensemble_21C_EF_oct25
+# go to 10_B_projection_ensemble_21C_oct25
