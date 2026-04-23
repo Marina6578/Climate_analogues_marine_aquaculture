@@ -19,29 +19,29 @@ Oceanographic data were accessed through rerddap (Chamberlain, 2015). Spatial da
 | Script Used | Description of code |
 |-------------|---------------------|
 | Helpers | functions to help with other codes |
-| 1_Download_JPL_MUR_SST | code to download historical SST data |
-| 2_MergeJPL_MUR_SST_and_Mean.Rmd | merge historical data SST and find mean |
-| 3_Run_Wget_scripts.Rmd | find SST projections |
-| 4_Merge_and_trim_CMIP_netCDFs.Rmd | merge and trim SST projections to region |
-| 5_Crop_Regrid_and_Add.Rmd | recrop and regrid and bias correction |
-| 6_Get_days_Hotter_than_historicaldata.Rmd | get days hotter than SST thresholds in historical data |
-| 7_Crop_Regrid_and_Add.Rmd | recrop and regrid and bias correction |
-| 8_Get_days_hotter_than.Rmd | get days hotter than SST thresholds in projections 17C and 21.5C |
-| 9_A_values_historical_data_aqua_sites_EF_Oct25.Rmd | Check historical values of number of days above the SST thresholds in current finfish aquaculture sites |
-| 9_B_reclass_17C_EF_Oct25.Rmd | reclassify the daysabove17C data considering the historical frequency of days over 17C |
-| 9_C_reclass_21C_EF_Oct25.Rmd | reclassify the daysabove 21.5C data considering the historical frequency of days over 21.5C |
-| 10_projection_ensemble_17C_EF_Oct25.Rmd | gather the reclassified 17C data of all ESMs in an ensemble |
-| 10_projection_ensemble_21C_EF_Oct25.Rmd | gather the reclassified 21.5C data of all ESMs in an ensemble |
-| 11_Overlapping_suitable_analogues_EF_Oct25.Rmd | Overlap the reclassified 17C ensembles and the 21.5C ensembles |
-| 12_Reclass_ESM_agreement_viridis_EF_Oct25 | Confidence level calculation and map creation showing the agreement between ESMs. Last step is the creation of a composite map |
-| 13_A_MSP_contraints_shipping_EF_Oct25 | Make the shipping constraints layer |
-| 13_B_MSP_FINAL_Code_function_Constraints_EF_Oct25 | Make the constraint layer to aquaculture to later overlap with the climate data |
-| 14_km2_suitability_over_time_results_EF_Oct25 | Check amount of area that is analogue of suitable and optimal condition over time without constraints to aquaculture |
-| 15_climate_MSP_combined_analysis_viridis_EF_Oct25 | Make maps of analogues with ESM agreements and constraints - individually, then makes composite plot (Viridis) |
-| 16_km2_area_climate_and_constraints_plots_EF_Oct25 | Check amount of area that is analogue of suitable and optimal condition over time with constraints to aquaculture |
-| 17_km2_fold_area_available_marine_territory_overtime_EF_Oct25 | fold area available over time by marine territory |
-| 18_Marine territories_map_with_inset_EF_OCt25 | make map for publication in R with inset map |
-| 19_plots_unconstrained_by_territory_EF_Oct25 | make plots of analogues of suitable and optimal conditions without constraints to aquaculture |
-| 20_plots_paper_constrained_by_territory_EF_Oct25 | make plots of analogues of suitable and optimal conditions with constraints to aquaculture |
-| 21_comparison_contrained_not_table_EF_Ot25 | compare areas of analogues of suitable and optimal conditions with and without constraints and make a table to facilitate writing |
-| 22_comparison_before_after_constraints_EF_Oct25 | making texts and other comparisons that we can use to write about the results and the discussion |
+| 01_Download_JPL_MUR_SST | code to download historical SST data |
+| 02_MergeJPL_MUR_SST_and_Mean.Rmd | merge historical data SST and find mean |
+| 03_Run_Wget_scripts.Rmd | find SST projections |
+| 04_Merge_and_trim_CMIP_netCDFs.Rmd | merge and trim SST projections to region |
+| 05_Crop_Regrid_and_Add.Rmd | recrop and regrid and bias correction |
+| 06_Get_days_Hotter_than_historicaldata.Rmd | get days hotter than SST thresholds in historical data |
+| 07_Crop_Regrid_and_Add.Rmd | recrop and regrid and bias correction |
+| 08_Get_days_hotter_than.Rmd | get days hotter than SST thresholds in projections 17C and 21.5C |
+| 09_A_values_historical_data_aqua_sites_EF_Oct25.Rmd | Check historical values of number of days above the SST thresholds in current finfish aquaculture sites |
+| 09_B_reclass_17C_Oct25.Rmd | reclassify the daysabove17C data considering the historical frequency of days over 17C |
+| 09_C_reclass_21C_Oct25.Rmd | reclassify the daysabove 21.5C data considering the historical frequency of days over 21.5C |
+| 10_projection_ensemble_17C_Oct25.Rmd | gather the reclassified 17C data of all ESMs in an ensemble |
+| 10_projection_ensemble_21C_Oct25.Rmd | gather the reclassified 21.5C data of all ESMs in an ensemble |
+| 11_Overlapping_suitable_analogues_Oct25.Rmd | Overlap the reclassified 17C ensembles and the 21.5C ensembles |
+| 12_Reclass_ESM_agreement_viridis_Oct25 | Confidence level calculation and map creation showing the agreement between ESMs. Last step is the creation of a composite map |
+| 13_A_MSP_contraints_shipping_Oct25 | Make the shipping constraints layer |
+| 13_B_MSP_FINAL_Code_function_Constraints_Oct25 | Make the constraint layer to aquaculture to later overlap with the climate data |
+| 14_km2_suitability_over_time_results_Oct25 | Check amount of area that is analogue of suitable and optimal condition over time without constraints to aquaculture |
+| 15_climate_MSP_combined_analysis_viridis_Oct25 | Make maps of analogues with ESM agreements and constraints - individually, then makes composite plot (Viridis) |
+| 16_km2_area_climate_and_constraints_plots_Oct25 | Check amount of area that is analogue of suitable and optimal condition over time with constraints to aquaculture |
+| 17_km2_fold_area_available_marine_territory_overtime_Oct25 | fold area available over time by marine territory |
+| 18_Marine territories_map_with_inset_OCt25 | make map for publication in R with inset map |
+| 19_plots_unconstrained_by_territory_Oct25 | make plots of analogues of suitable and optimal conditions without constraints to aquaculture |
+| 20_plots_paper_constrained_by_territory_Oct25 | make plots of analogues of suitable and optimal conditions with constraints to aquaculture |
+| 21_comparison_contrained_not_table_Ot25 | compare areas of analogues of suitable and optimal conditions with and without constraints and make a table to facilitate writing |
+| 22_comparison_before_after_constraints_Oct25 | making texts and other comparisons that we can use to write about the results and the discussion |
